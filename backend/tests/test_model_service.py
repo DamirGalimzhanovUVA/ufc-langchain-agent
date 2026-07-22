@@ -35,3 +35,39 @@ def test_get_model_raises_when_model_is_not_initialized() -> None:
 
     with pytest.raises(RuntimeError, match="The model has not been initialized"):
         service.get_model()
+
+
+def test_create_chat_completion_returns_assistant_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = Mock()
+    model.create_chat_completion.return_value = {
+        "choices": [{"message": {"content": "An API lets software communicate."}}]
+    }
+    monkeypatch.setattr(model_service_module, "Llama", Mock(return_value=model))
+    service = ModelService()
+    service.initialize("model.gguf")
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is an API?"},
+    ]
+
+    response = service.create_chat_completion(messages)
+
+    assert response == "An API lets software communicate."
+    model.create_chat_completion.assert_called_once_with(messages=messages)
+
+
+def test_create_chat_completion_raises_for_empty_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = Mock()
+    model.create_chat_completion.return_value = {
+        "choices": [{"message": {"content": None}}]
+    }
+    monkeypatch.setattr(model_service_module, "Llama", Mock(return_value=model))
+    service = ModelService()
+    service.initialize("model.gguf")
+
+    with pytest.raises(RuntimeError, match="empty assistant response"):
+        service.create_chat_completion([{"role": "user", "content": "Hello"}])
