@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.services.model_service import model_service
+from services.model_service import model_service
 
 
 @asynccontextmanager
