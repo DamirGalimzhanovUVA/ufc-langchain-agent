@@ -1,3 +1,6 @@
+from collections.abc import Iterator
+from typing import Any, cast
+
 from llama_cpp import Llama
 
 ChatMessage = dict[str, str]
@@ -19,15 +22,15 @@ class ModelService:
 
         return self.model
 
-    def create_chat_completion(self, messages: list[ChatMessage]) -> str:
+    def create_chat_completion(self, messages: list[ChatMessage]) -> Iterator[str]:
         model = self.get_model()
-        completion = model.create_chat_completion(messages=messages)
-        content = completion["choices"][0]["message"]["content"]
+        completion = model.create_chat_completion(messages=messages, stream=True)
 
-        if content is None:
-            raise RuntimeError("The model returned an empty assistant response")
+        for chunk in cast(Iterator[dict[str, Any]], completion):
+            content = chunk["choices"][0]["delta"].get("content")
 
-        return content
+            if content:
+                yield content
 
 
 model_service = ModelService()

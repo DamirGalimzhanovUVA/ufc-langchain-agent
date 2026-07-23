@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 import main
 
 
-def test_chat_returns_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
     service = Mock()
-    service.create_chat_completion.return_value = "An API lets software communicate."
+    service.create_chat_completion.return_value = iter(
+        ["An API ", "lets software communicate."]
+    )
     monkeypatch.setenv("LLAMA_MODEL_PATH", "model.gguf")
     monkeypatch.setattr(main, "model_service", service)
     messages = [
@@ -17,10 +19,12 @@ def test_chat_returns_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
     with TestClient(main.app) as client:
-        response = client.post("/chat", json={"messages": messages})
+        with client.stream("POST", "/chat", json={"messages": messages}) as response:
+            body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert response.json() == {"response": "An API lets software communicate."}
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert body == "An API lets software communicate."
     service.initialize.assert_called_once_with("model.gguf")
     service.create_chat_completion.assert_called_once_with(messages)
 

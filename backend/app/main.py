@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
+from starlette.responses import StreamingResponse
 
 from services.model_service import ModelService, model_service
 
@@ -15,10 +16,6 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-
-
-class ChatResponse(BaseModel):
-    response: str
 
 
 @asynccontextmanager
@@ -35,9 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/chat", response_model=ChatResponse)
-def create_chat_completion(chat_request: ChatRequest, request: Request) -> ChatResponse:
+@app.post("/chat", response_class=StreamingResponse)
+def create_chat_completion(
+    chat_request: ChatRequest, request: Request
+) -> StreamingResponse:
     service: ModelService = request.app.state.model_service
     messages = [message.model_dump() for message in chat_request.messages]
-    response = service.create_chat_completion(messages)
-    return ChatResponse(response=response)
+    tokens = service.create_chat_completion(messages)
+    return StreamingResponse(tokens, media_type="text/plain")
