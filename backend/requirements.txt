@@ -1,4 +1,5 @@
 fastapi
+langchain-core
 llama-cpp-python
 pytest
 uvicorn[standard]
