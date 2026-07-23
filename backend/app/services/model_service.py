@@ -12,7 +12,13 @@ class ModelService:
 
     def initialize(self, model_path: str) -> Llama:
         if self.model is None:
-            self.model = Llama(model_path=model_path)
+            self.model = Llama(
+                model_path=model_path,
+                n_ctx=8192,
+                n_gpu_layers=-1,
+                verbose=True,
+            )
+        
 
         return self.model
 
@@ -24,7 +30,11 @@ class ModelService:
 
     def create_chat_completion(self, messages: list[ChatMessage]) -> Iterator[str]:
         model = self.get_model()
-        completion = model.create_chat_completion(messages=messages, stream=True)
+        completion = model.create_chat_completion(
+            messages=messages, 
+            stream=True, 
+            max_tokens=2048
+        )
 
         for chunk in cast(Iterator[dict[str, Any]], completion):
             content = chunk["choices"][0]["delta"].get("content")
