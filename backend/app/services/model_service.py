@@ -74,36 +74,29 @@ class LlamaCppChatModel(BaseChatModel):
 
 class ModelService:
     def __init__(self) -> None:
-        self.model: Llama | None = None
         self.chat_model: BaseChatModel | None = None
 
-    def initialize(self, model_path: str) -> Llama:
-        if self.model is None:
-            self.model = Llama(
+    def initialize(self, model_path: str) -> BaseChatModel:
+        if self.chat_model is None:
+            llama_model = Llama(
                 model_path=model_path,
                 n_ctx=8192,
                 n_gpu_layers=-1,
                 verbose=True,
             )
-            self.chat_model = LlamaCppChatModel(model=self.model)
+            self.chat_model = LlamaCppChatModel(model=llama_model)
 
-        return self.model
+        return self.chat_model
 
-    def get_model(self) -> Llama:
-        if self.model is None:
-            raise RuntimeError("The model has not been initialized")
-
-        return self.model
-
-    def get_chat_model(self) -> BaseChatModel:
+    def get_model(self) -> BaseChatModel:
         if self.chat_model is None:
-            raise RuntimeError("The chat model has not been initialized")
+            raise RuntimeError("The model has not been initialized")
 
         return self.chat_model
 
     def create_chat_completion(self, messages: list[ChatMessage]) -> Iterator[str]:
-        chat_model = self.get_chat_model()
-        for chunk in chat_model.stream(messages):
+        model = self.get_model()
+        for chunk in model.stream(messages):
             content = chunk.content
             if isinstance(content, str) and content:
                 yield content

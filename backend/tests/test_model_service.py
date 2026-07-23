@@ -16,15 +16,15 @@ def test_initialize_creates_model_once(monkeypatch: pytest.MonkeyPatch) -> None:
     first_result = service.initialize("first-model.gguf")
     second_result = service.initialize("second-model.gguf")
 
-    assert first_result is model
-    assert second_result is model
+    assert first_result is second_result
+    assert first_result.model is model
     llama.assert_called_once_with(
         model_path="first-model.gguf",
         n_ctx=8192,
         n_gpu_layers=-1,
         verbose=True,
     )
-    assert service.get_chat_model().model is model
+    assert service.get_model() is first_result
 
 
 def test_get_model_returns_initialized_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -34,7 +34,7 @@ def test_get_model_returns_initialized_model(monkeypatch: pytest.MonkeyPatch) ->
 
     service.initialize("model.gguf")
 
-    assert service.get_model() is model
+    assert service.get_model().model is model
 
 
 def test_get_model_raises_when_model_is_not_initialized() -> None:
@@ -42,15 +42,6 @@ def test_get_model_raises_when_model_is_not_initialized() -> None:
 
     with pytest.raises(RuntimeError, match="The model has not been initialized"):
         service.get_model()
-
-
-def test_get_chat_model_raises_when_model_is_not_initialized() -> None:
-    service = ModelService()
-
-    with pytest.raises(
-        RuntimeError, match="The chat model has not been initialized"
-    ):
-        service.get_chat_model()
 
 
 def test_llama_cpp_chat_model_streams_assistant_response() -> None:
