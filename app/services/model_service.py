@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -32,7 +33,12 @@ Use the Wikipedia tool for fighter background and career information.
 Use the fighter stats tool for structured fighter statistics.
 Use the Tavily news tool for recent developments. When using it, generate a
 focused, standalone search query that preserves every person and topic from the
-user's question.
+user's question. After each search, determine whether the result content answers
+the user's specific question. If it does not, refine the query based on what is
+missing and search again. Make no more than two retries after the original search,
+for a maximum of three Tavily searches per user request. Do not retry after finding
+a relevant answer. If all three searches fail to find one, clearly say that the
+answer could not be found.
 Do not call tools when the answer can be produced from the existing conversation.
 If a tool fails, explain the failure instead of inventing results.
 After using tools, produce a normal user-facing answer."""
@@ -118,6 +124,13 @@ class ModelService:
                 model=self.chat_model,
                 tools=self.tools,
                 system_prompt=SYSTEM_PROMPT,
+                middleware=[
+                    ToolCallLimitMiddleware(
+                        tool_name="fighter_news",
+                        run_limit=3,
+                        exit_behavior="continue",
+                    )
+                ],
             )
 
         return self.chat_model

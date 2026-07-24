@@ -22,8 +22,12 @@ def test_initialize_creates_model_and_agent_once(
     chat_openai = Mock(return_value=chat_model)
     agent = Mock()
     create_agent = Mock(return_value=agent)
+    tool_call_limit = Mock(return_value=Mock())
     monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
     monkeypatch.setattr(model_service_module, "create_agent", create_agent)
+    monkeypatch.setattr(
+        model_service_module, "ToolCallLimitMiddleware", tool_call_limit
+    )
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost:9090/v1")
     monkeypatch.setenv("LLM_MODEL", "qwen-local")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
@@ -50,10 +54,28 @@ def test_initialize_creates_model_and_agent_once(
         "fighter_stats",
         "fighter_wikipedia",
     ]
+    tool_call_limit.assert_called_once_with(
+        tool_name="fighter_news",
+        run_limit=3,
+        exit_behavior="continue",
+    )
     create_agent.assert_called_once_with(
         model=chat_model,
         tools=service.tools,
         system_prompt=model_service_module.SYSTEM_PROMPT,
+        middleware=[tool_call_limit.return_value],
+    )
+
+
+def test_system_prompt_requires_up_to_two_relevant_news_retries() -> None:
+    assert "determine whether the result content answers" in (
+        model_service_module.SYSTEM_PROMPT
+    )
+    assert "no more than two retries after the original search" in (
+        model_service_module.SYSTEM_PROMPT
+    )
+    assert "maximum of three Tavily searches per user request" in (
+        model_service_module.SYSTEM_PROMPT
     )
 
 
