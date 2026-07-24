@@ -5,5 +5,5 @@ langchain-core
 langchain-openai
 pytest
 python-dotenv
-tavily-python
+requests
 uvicorn[standard]

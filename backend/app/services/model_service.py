@@ -18,7 +18,6 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError
-from tavily import TavilyClient
 
 from services.fighter_stats_provider import HttpFighterStatsProvider
 from services.fighter_tools import (
@@ -156,16 +155,11 @@ class ModelService:
                 api_key=os.environ.get("FIGHTER_STATS_API_KEY"),
             )
             tavily_api_key = os.environ.get("TAVILY_API_KEY")
-            tavily_client = (
-                TavilyClient(api_key=tavily_api_key)
-                if tavily_api_key
-                else None
-            )
             self.tools = create_fighter_tools(
                 news_client=TavilyNewsClient(tavily_api_key),
                 stats_provider=stats_provider,
                 wikipedia_client=WikipediaClient(),
-                tavily_client=tavily_client,
+                tavily_api_key=tavily_api_key,
             )
             self.agent = create_agent(
                 model=self.chat_model,

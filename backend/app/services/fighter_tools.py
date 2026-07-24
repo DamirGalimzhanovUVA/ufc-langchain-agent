@@ -4,9 +4,9 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
+import requests
 from bs4 import BeautifulSoup
 from langchain_core.tools import BaseTool, StructuredTool
-from tavily import TavilyClient
 
 from services.fighter_stats_provider import FighterStatsProvider
 
@@ -143,17 +143,24 @@ def extract_fight_description(html: str) -> str:
 
 def get_fight_description(
     query: str,
-    tavily_client: TavilyClient | None,
+    tavily_api_key: str | None,
     timeout_seconds: float = 10,
 ) -> dict[str, Any]:
-    if tavily_client is None:
+    if not tavily_api_key:
         raise RuntimeError("TAVILY_API_KEY must be set")
 
-    response = tavily_client.search(
-        query=query,
-        search_depth="advanced",
-        include_domains=["mmafighting.com"],
+    search_response = requests.post(
+        "https://api.tavily.com/search",
+        json={
+            "query": query,
+            "search_depth": "advanced",
+            "include_domains": ["mmafighting.com"],
+        },
+        headers={"Authorization": f"Bearer {tavily_api_key}"},
+        timeout=timeout_seconds,
     )
+    search_response.raise_for_status()
+    response = search_response.json()
     article_url = next(
         (
             result.get("url")
@@ -175,18 +182,18 @@ def get_fight_description(
             "description": None,
         }
 
-    request = Request(
+    article_response = requests.get(
         article_url,
         headers={"User-Agent": "ufc-langchain-chat/1.0"},
+        timeout=timeout_seconds,
     )
-    with urlopen(request, timeout=timeout_seconds) as article_response:
-        html = article_response.read().decode("utf-8")
+    article_response.raise_for_status()
 
     return {
         "query": query,
         "found": True,
         "url": article_url,
-        "description": extract_fight_description(html),
+        "description": extract_fight_description(article_response.text),
     }
 
 
@@ -194,7 +201,7 @@ def create_fighter_tools(
     news_client: TavilyNewsClient,
     stats_provider: FighterStatsProvider,
     wikipedia_client: WikipediaClient,
-    tavily_client: TavilyClient | None = None,
+    tavily_api_key: str | None = None,
 ) -> list[BaseTool]:
     def search_fighter_news(query: str) -> dict[str, Any]:
         """Search MMA news using a focused, standalone semantic query."""
@@ -235,7 +242,7 @@ def create_fighter_tools(
             "fight_description",
             arguments,
         )
-        result = get_fight_description(query, tavily_client)
+        result = get_fight_description(query, tavily_api_key)
         logger.info(
             "Tool result: name=%s result=%s",
             "fight_description",
