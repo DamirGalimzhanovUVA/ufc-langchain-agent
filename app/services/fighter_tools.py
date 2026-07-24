@@ -119,18 +119,34 @@ def create_fighter_tools(
 ) -> list[BaseTool]:
     def search_fighter_news(query: str) -> dict[str, Any]:
         """Search MMA news using a focused, standalone semantic query."""
-        return news_client.search_news(query)
+        arguments = {"query": query}
+        logger.info("Tool call: name=%s arguments=%s", "fighter_news", arguments)
+        result = news_client.search_news(query)
+        logger.info("Tool result: name=%s result=%s", "fighter_news", result)
+        return result
 
     def get_fighter_stats(fighter_name: str) -> dict[str, Any]:
         """Get current career and fight statistics for a named MMA fighter."""
-        return {
+        arguments = {"fighter_name": fighter_name}
+        logger.info("Tool call: name=%s arguments=%s", "fighter_stats", arguments)
+        result = {
             "fighter": fighter_name,
             "stats": stats_provider.get_fighter_stats(fighter_name),
         }
+        logger.info("Tool result: name=%s result=%s", "fighter_stats", result)
+        return result
 
     def get_fighter_wikipedia(fighter_name: str) -> dict[str, Any]:
         """Get a named MMA fighter's biography from their Wikipedia page."""
-        return wikipedia_client.get_fighter_page(fighter_name)
+        arguments = {"fighter_name": fighter_name}
+        logger.info(
+            "Tool call: name=%s arguments=%s", "fighter_wikipedia", arguments
+        )
+        result = wikipedia_client.get_fighter_page(fighter_name)
+        logger.info(
+            "Tool result: name=%s result=%s", "fighter_wikipedia", result
+        )
+        return result
 
     return [
         StructuredTool.from_function(

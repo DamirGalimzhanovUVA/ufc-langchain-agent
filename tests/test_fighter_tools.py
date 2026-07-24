@@ -130,7 +130,11 @@ def test_wikipedia_client_returns_page_summary(
     assert "action=query" in request.full_url
 
 
-def test_tools_delegate_to_injected_clients_and_provider() -> None:
+def test_tools_delegate_to_injected_clients_and_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = Mock()
+    monkeypatch.setattr(fighter_tools_module, "logger", logger)
     news_client = Mock()
     news_client.search_news.return_value = {"results": []}
     stats_provider = Mock()
@@ -161,3 +165,44 @@ def test_tools_delegate_to_injected_clients_and_provider() -> None:
         "stats": {"wins": 30},
     }
     assert wikipedia_result == {"found": True}
+    logger.info.assert_has_calls(
+        [
+            call(
+                "Tool call: name=%s arguments=%s",
+                "fighter_news",
+                {
+                    "query": (
+                        "What did José Aldo say about retirement?"
+                    )
+                },
+            ),
+            call(
+                "Tool result: name=%s result=%s",
+                "fighter_news",
+                {"results": []},
+            ),
+            call(
+                "Tool call: name=%s arguments=%s",
+                "fighter_stats",
+                {"fighter_name": "José Aldo"},
+            ),
+            call(
+                "Tool result: name=%s result=%s",
+                "fighter_stats",
+                {
+                    "fighter": "José Aldo",
+                    "stats": {"wins": 30},
+                },
+            ),
+            call(
+                "Tool call: name=%s arguments=%s",
+                "fighter_wikipedia",
+                {"fighter_name": "José Aldo"},
+            ),
+            call(
+                "Tool result: name=%s result=%s",
+                "fighter_wikipedia",
+                {"found": True},
+            ),
+        ]
+    )
