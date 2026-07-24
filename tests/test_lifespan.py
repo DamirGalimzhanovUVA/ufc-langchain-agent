@@ -9,6 +9,19 @@ from fastapi import FastAPI
 import main
 
 
+def test_load_environment_reads_default_backend_env_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    load_dotenv = Mock()
+    monkeypatch.setattr(main, "load_dotenv", load_dotenv)
+    monkeypatch.delenv("ENV_FILE", raising=False)
+
+    main.load_environment()
+
+    expected_env_file = Path(main.__file__).resolve().parents[1] / ".env"
+    load_dotenv.assert_called_once_with(expected_env_file)
+
+
 def test_load_environment_reads_configured_env_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
