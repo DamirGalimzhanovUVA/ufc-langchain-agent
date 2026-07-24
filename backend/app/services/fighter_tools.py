@@ -149,18 +149,25 @@ def get_fight_description(
     if not tavily_api_key:
         raise RuntimeError("TAVILY_API_KEY must be set")
 
+    payload = {
+        "query": query,
+        "search_depth": "advanced",
+        "include_domains": ["mmafighting.com"],
+    }
+    logger.info(
+        "Tavily fight description request: url=%s payload=%s",
+        "https://api.tavily.com/search",
+        payload,
+    )
     search_response = requests.post(
         "https://api.tavily.com/search",
-        json={
-            "query": query,
-            "search_depth": "advanced",
-            "include_domains": ["mmafighting.com"],
-        },
+        json=payload,
         headers={"Authorization": f"Bearer {tavily_api_key}"},
         timeout=timeout_seconds,
     )
     search_response.raise_for_status()
     response = search_response.json()
+    logger.info("Tavily fight description response: %s", response)
     article_url = next(
         (
             result.get("url")
