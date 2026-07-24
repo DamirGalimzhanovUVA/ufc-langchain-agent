@@ -56,21 +56,21 @@ def convert_messages(messages: list[ChatMessage]) -> list[BaseMessage]:
     return converted_messages
 
 
-def get_text_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-
-    text_parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            text_parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
+def get_generated_chunks(
+    content_blocks: list[dict[str, Any]],
+) -> list[tuple[str, str]]:
+    generated_chunks: list[tuple[str, str]] = []
+    for block in content_blocks:
+        block_type = block.get("type")
+        if block_type == "text":
             text = block.get("text")
             if isinstance(text, str):
-                text_parts.append(text)
-    return "".join(text_parts)
+                generated_chunks.append(("text", text))
+        elif block_type == "reasoning":
+            reasoning = block.get("reasoning")
+            if isinstance(reasoning, str):
+                generated_chunks.append(("reasoning", reasoning))
+    return generated_chunks
 
 
 def is_server_connection_error(error: BaseException) -> bool:
@@ -137,7 +137,7 @@ class ModelService:
     ) -> Iterator[str]:
         agent = self.get_agent()
         agent_messages = convert_messages(messages)
-        returned_text = False
+        returned_content = False
 
         try:
             stream = agent.stream(
@@ -149,13 +149,17 @@ class ModelService:
                 if not isinstance(token, AIMessageChunk):
                     continue
 
-                content = get_text_content(token.content)
-                if not content:
-                    continue
+                for chunk_type, content in get_generated_chunks(
+                    token.content_blocks
+                ):
+                    if not content:
+                        continue
 
-                logger.info("Generated model chunk: %r", content)
-                returned_text = True
-                yield content
+                    logger.info(
+                        "Generated %s chunk: %r", chunk_type, content
+                    )
+                    returned_content = True
+                    yield content
         except Exception as error:
             if is_server_connection_error(error):
                 raise RuntimeError(
@@ -164,7 +168,7 @@ class ModelService:
                 ) from None
             raise
 
-        if not returned_text:
+        if not returned_content:
             raise RuntimeError("The agent did not return an assistant response")
 
 

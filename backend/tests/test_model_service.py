@@ -120,6 +120,19 @@ def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
         *args: object, **kwargs: object
     ) -> Iterator[tuple[AIMessageChunk, dict[str, str]]]:
         nonlocal stream_finished
+        yield (
+            AIMessageChunk(
+                content="",
+                additional_kwargs={"reasoning_content": "Thinking "},
+            ),
+            {"langgraph_node": "model"},
+        )
+        yield (
+            AIMessageChunk(
+                content=[{"type": "reasoning", "reasoning": "carefully. "}]
+            ),
+            {"langgraph_node": "model"},
+        )
         yield AIMessageChunk(content="Final "), {"langgraph_node": "model"}
         yield AIMessageChunk(content="answer"), {"langgraph_node": "model"}
         stream_finished = True
@@ -135,15 +148,19 @@ def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
 
     tokens = service.create_chat_completion(messages)
 
-    assert next(tokens) == "Final "
+    assert next(tokens) == "Thinking "
     assert stream_finished is False
-    logger.info.assert_called_once_with("Generated model chunk: %r", "Final ")
+    logger.info.assert_called_once_with(
+        "Generated %s chunk: %r", "reasoning", "Thinking "
+    )
 
-    assert list(tokens) == ["answer"]
+    assert list(tokens) == ["carefully. ", "Final ", "answer"]
     assert stream_finished is True
     assert logger.info.call_args_list == [
-        call("Generated model chunk: %r", "Final "),
-        call("Generated model chunk: %r", "answer"),
+        call("Generated %s chunk: %r", "reasoning", "Thinking "),
+        call("Generated %s chunk: %r", "reasoning", "carefully. "),
+        call("Generated %s chunk: %r", "text", "Final "),
+        call("Generated %s chunk: %r", "text", "answer"),
     ]
     invocation = agent.stream.call_args
     assert invocation.args[0] == {
