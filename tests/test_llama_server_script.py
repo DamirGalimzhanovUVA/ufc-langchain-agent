@@ -5,12 +5,13 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT_PATH = Path(__file__).parents[2] / "start-llama-server.sh"
+SCRIPT_PATH = Path(__file__).parents[1] / "start-llama-server.sh"
 
 
 def test_llama_server_script_requires_model_path() -> None:
     environment = os.environ.copy()
     environment.pop("MODEL_PATH", None)
+    environment["ENV_FILE"] = "/missing/.env"
 
     result = subprocess.run(
         [str(SCRIPT_PATH)],
@@ -25,7 +26,11 @@ def test_llama_server_script_requires_model_path() -> None:
 
 
 def test_llama_server_script_rejects_missing_model_file() -> None:
-    environment = {**os.environ, "MODEL_PATH": "/missing/model.gguf"}
+    environment = {
+        **os.environ,
+        "ENV_FILE": "/missing/.env",
+        "MODEL_PATH": "/missing/model.gguf",
+    }
 
     result = subprocess.run(
         [str(SCRIPT_PATH)],
@@ -90,6 +95,7 @@ def test_llama_server_script_starts_server_with_configured_arguments(
     monkeypatch.setenv("LLAMA_SERVER_PORT", "9090")
     monkeypatch.setenv("LLAMA_CONTEXT_SIZE", "4096")
     monkeypatch.setenv("LLAMA_GPU_LAYERS", "42")
+    monkeypatch.setenv("ENV_FILE", str(tmp_path / "missing.env"))
 
     result = subprocess.run(
         [str(SCRIPT_PATH)],
@@ -112,4 +118,6 @@ def test_llama_server_script_starts_server_with_configured_arguments(
         "--n-gpu-layers",
         "42",
         "--jinja",
+        "--reasoning",
+        "off",
     ]
