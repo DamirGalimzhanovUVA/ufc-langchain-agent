@@ -15,44 +15,45 @@ class JsonResponse(io.BytesIO):
         self.close()
 
 
-def test_http_stats_provider_requests_configured_api(
+def test_http_stats_provider_requests_cito_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     urlopen = Mock(return_value=JsonResponse(b'{"wins": 22, "losses": 3}'))
     monkeypatch.setattr(provider_module, "urlopen", urlopen)
-    provider = HttpFighterStatsProvider(
-        "https://stats.example/fighters", api_key="secret"
-    )
+    provider = HttpFighterStatsProvider(api_key="secret")
 
     result = provider.get_fighter_stats("Valentina Shevchenko")
 
     assert result == {"wins": 22, "losses": 3}
     request = urlopen.call_args.args[0]
     assert request.full_url == (
-        "https://stats.example/fighters?"
-        "fighter_name=Valentina+Shevchenko"
+        "https://api.citoapi.com/api/v1/ufc/fighters/"
+        "valentina-shevchenko/stats"
     )
-    assert request.get_header("Authorization") == "Bearer secret"
+    assert request.get_header("X-api-key") == "secret"
     urlopen.assert_called_once_with(request, timeout=10)
 
 
-def test_http_stats_provider_supports_fighter_name_url_template(
+@pytest.mark.parametrize(
+    ("fighter_name", "slug"),
+    [
+        ("*Dricucs* Du Plessis", "dricucs-du-plessis"),
+        ("Benoit Saint Denis", "benoit-saint-denis"),
+        ("Loneer Kavanagh", "loneer-kavanagh"),
+    ],
+)
+def test_http_stats_provider_builds_fighter_slug(
     monkeypatch: pytest.MonkeyPatch,
+    fighter_name: str,
+    slug: str,
 ) -> None:
     urlopen = Mock(return_value=JsonResponse(b'{"wins": 12}'))
     monkeypatch.setattr(provider_module, "urlopen", urlopen)
-    provider = HttpFighterStatsProvider(
-        "https://stats.example/fighters/{fighter_name}"
-    )
+    provider = HttpFighterStatsProvider()
 
-    provider.get_fighter_stats("Tom Aspinall")
+    provider.get_fighter_stats(fighter_name)
 
     request = urlopen.call_args.args[0]
-    assert request.full_url == "https://stats.example/fighters/Tom%20Aspinall"
-
-
-def test_http_stats_provider_requires_api_url() -> None:
-    provider = HttpFighterStatsProvider("")
-
-    with pytest.raises(RuntimeError, match="FIGHTER_STATS_API_URL must be set"):
-        provider.get_fighter_stats("Alex Pereira")
+    assert request.full_url == (
+        f"https://api.citoapi.com/api/v1/ufc/fighters/{slug}/stats"
+    )

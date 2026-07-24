@@ -127,7 +127,6 @@ class ModelService:
             )
             self.chat_model = LlamaCppChatModel(model=llama_model)
             stats_provider = HttpFighterStatsProvider(
-                api_url=os.environ.get("FIGHTER_STATS_API_URL", ""),
                 api_key=os.environ.get("FIGHTER_STATS_API_KEY"),
             )
             self.tools = create_fighter_tools(
