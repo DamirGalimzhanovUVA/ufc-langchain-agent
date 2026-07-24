@@ -1,10 +1,12 @@
 import json
 import logging
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from bs4 import BeautifulSoup
 from langchain_core.tools import BaseTool, StructuredTool
+from tavily import TavilyClient
 
 from services.fighter_stats_provider import FighterStatsProvider
 
@@ -112,10 +114,87 @@ class WikipediaClient:
         }
 
 
+def extract_fight_description(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    article_body = soup.select_one("main#content article #zephr-anchor")
+    if article_body is None:
+        article_body = soup.select_one("main#content article")
+    if article_body is None:
+        raise ValueError("MMA Fighting article body was not found")
+
+    paragraphs: list[str] = []
+    for component in article_body.select(
+        ".duet--article--article-body-component"
+    ):
+        if component.find(["h2", "h3"]):
+            break
+
+        paragraph = component.select_one(
+            "p.duet--article--standard-paragraph"
+        )
+        if paragraph is not None:
+            paragraphs.append(paragraph.get_text(" ", strip=True))
+
+    if not paragraphs:
+        raise ValueError("MMA Fighting article description was not found")
+
+    return "\n\n".join(paragraphs)
+
+
+def get_fight_description(
+    query: str,
+    tavily_client: TavilyClient | None,
+    timeout_seconds: float = 10,
+) -> dict[str, Any]:
+    if tavily_client is None:
+        raise RuntimeError("TAVILY_API_KEY must be set")
+
+    response = tavily_client.search(
+        query=query,
+        search_depth="advanced",
+        include_domains=["mmafighting.com"],
+    )
+    article_url = next(
+        (
+            result.get("url")
+            for result in response.get("results", [])
+            if isinstance(result, dict)
+            and isinstance(result.get("url"), str)
+            and (
+                urlparse(result["url"]).hostname == "mmafighting.com"
+                or urlparse(result["url"]).hostname == "www.mmafighting.com"
+            )
+        ),
+        None,
+    )
+    if article_url is None:
+        return {
+            "query": query,
+            "found": False,
+            "url": None,
+            "description": None,
+        }
+
+    request = Request(
+        article_url,
+        headers={"User-Agent": "ufc-langchain-chat/1.0"},
+    )
+    with urlopen(request, timeout=timeout_seconds) as article_response:
+        html = article_response.read().decode("utf-8")
+
+    return {
+        "query": query,
+        "found": True,
+        "url": article_url,
+        "description": extract_fight_description(html),
+    }
+
+
 def create_fighter_tools(
     news_client: TavilyNewsClient,
     stats_provider: FighterStatsProvider,
     wikipedia_client: WikipediaClient,
+    tavily_client: TavilyClient | None = None,
 ) -> list[BaseTool]:
     def search_fighter_news(query: str) -> dict[str, Any]:
         """Search MMA news using a focused, standalone semantic query."""
@@ -148,6 +227,22 @@ def create_fighter_tools(
         )
         return result
 
+    def find_fight_description(query: str) -> dict[str, Any]:
+        """Find and scrape an MMA Fighting live blog's fight description."""
+        arguments = {"query": query}
+        logger.info(
+            "Tool call: name=%s arguments=%s",
+            "fight_description",
+            arguments,
+        )
+        result = get_fight_description(query, tavily_client)
+        logger.info(
+            "Tool result: name=%s result=%s",
+            "fight_description",
+            result,
+        )
+        return result
+
     return [
         StructuredTool.from_function(
             search_fighter_news,
@@ -173,6 +268,15 @@ def create_fighter_tools(
             description=(
                 "Retrieve the introduction and URL from an MMA fighter's "
                 "Wikipedia page. Use this for biography and background."
+            ),
+        ),
+        StructuredTool.from_function(
+            find_fight_description,
+            name="fight_description",
+            description=(
+                "Find an MMA Fighting live-blog page for a specific fight and "
+                "retrieve the matchup description from the main article. Pass "
+                "a focused query containing both fighter names and 'live blog'."
             ),
         ),
     ]

@@ -1,7 +1,9 @@
+beautifulsoup4
 fastapi
 langchain
 langchain-core
 langchain-openai
 pytest
 python-dotenv
+tavily-python
 uvicorn[standard]
