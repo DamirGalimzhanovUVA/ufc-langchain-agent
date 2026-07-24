@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Iterator
 from typing import Any
@@ -7,6 +8,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -23,6 +25,7 @@ from services.fighter_tools import (
 )
 
 ChatMessage = dict[str, str]
+logger = logging.getLogger("uvicorn.error")
 
 SYSTEM_PROMPT = """You are a UFC research assistant.
 Use the Wikipedia tool for fighter background and career information.
@@ -134,12 +137,25 @@ class ModelService:
     ) -> Iterator[str]:
         agent = self.get_agent()
         agent_messages = convert_messages(messages)
+        returned_text = False
 
         try:
-            result = agent.invoke(
+            stream = agent.stream(
                 {"messages": agent_messages},
                 config={"recursion_limit": 10},
+                stream_mode="messages",
             )
+            for token, metadata in stream:
+                if not isinstance(token, AIMessageChunk):
+                    continue
+
+                content = get_text_content(token.content)
+                if not content:
+                    continue
+
+                logger.info("Generated model chunk: %r", content)
+                returned_text = True
+                yield content
         except Exception as error:
             if is_server_connection_error(error):
                 raise RuntimeError(
@@ -148,16 +164,8 @@ class ModelService:
                 ) from None
             raise
 
-        result_messages = result.get("messages", [])
-        for message in reversed(result_messages):
-            if not isinstance(message, AIMessage):
-                continue
-            content = get_text_content(message.content)
-            if content:
-                yield content
-                return
-
-        raise RuntimeError("The agent did not return an assistant response")
+        if not returned_text:
+            raise RuntimeError("The agent did not return an assistant response")
 
 
 model_service = ModelService()

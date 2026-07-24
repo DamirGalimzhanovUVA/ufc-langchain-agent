@@ -47,4 +47,11 @@ def create_chat_completion(
     service: ModelService = request.app.state.model_service
     messages = [message.model_dump() for message in chat_request.messages]
     tokens = service.create_chat_completion(messages)
-    return StreamingResponse(tokens, media_type="text/plain")
+    return StreamingResponse(
+        tokens,
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

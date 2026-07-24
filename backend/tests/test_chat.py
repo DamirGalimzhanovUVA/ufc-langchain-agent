@@ -23,6 +23,8 @@ def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
     assert body == "An API lets software communicate."
     service.initialize.assert_called_once_with()
     service.create_chat_completion.assert_called_once_with(messages)

@@ -1,8 +1,15 @@
-from unittest.mock import Mock
+from collections.abc import Iterator
+from unittest.mock import Mock, call
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 import services.model_service as model_service_module
 from services.model_service import ModelService, convert_messages
@@ -104,34 +111,97 @@ def test_convert_messages_rejects_unsupported_role() -> None:
         convert_messages([{"role": "tool", "content": "result"}])
 
 
-def test_create_chat_completion_returns_last_textual_assistant_message() -> None:
+def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream_finished = False
+
+    def stream(
+        *args: object, **kwargs: object
+    ) -> Iterator[tuple[AIMessageChunk, dict[str, str]]]:
+        nonlocal stream_finished
+        yield AIMessageChunk(content="Final "), {"langgraph_node": "model"}
+        yield AIMessageChunk(content="answer"), {"langgraph_node": "model"}
+        stream_finished = True
+
     agent = Mock()
-    agent.invoke.return_value = {
-        "messages": [
-            HumanMessage(content="Question"),
-            AIMessage(content="Earlier answer"),
-            AIMessage(content=[{"type": "text", "text": "Final answer"}]),
-        ]
-    }
+    agent.stream.side_effect = stream
+    logger = Mock()
+    monkeypatch.setattr(model_service_module, "logger", logger)
     service = ModelService()
     service.chat_model = Mock()
     service.agent = agent
     messages = [{"role": "user", "content": "Question"}]
 
-    tokens = list(service.create_chat_completion(messages))
+    tokens = service.create_chat_completion(messages)
 
-    assert tokens == ["Final answer"]
-    invocation = agent.invoke.call_args
+    assert next(tokens) == "Final "
+    assert stream_finished is False
+    logger.info.assert_called_once_with("Generated model chunk: %r", "Final ")
+
+    assert list(tokens) == ["answer"]
+    assert stream_finished is True
+    assert logger.info.call_args_list == [
+        call("Generated model chunk: %r", "Final "),
+        call("Generated model chunk: %r", "answer"),
+    ]
+    invocation = agent.stream.call_args
     assert invocation.args[0] == {
         "messages": [HumanMessage(content="Question")]
     }
-    assert invocation.kwargs == {"config": {"recursion_limit": 10}}
+    assert invocation.kwargs == {
+        "config": {"recursion_limit": 10},
+        "stream_mode": "messages",
+    }
+
+
+def test_create_chat_completion_ignores_non_text_agent_events() -> None:
+    agent = Mock()
+    agent.stream.return_value = iter(
+        [
+            (
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "fighter_stats",
+                            "args": '{"fighter_name": "José Aldo"}',
+                            "id": "call-1",
+                            "index": 0,
+                        }
+                    ],
+                ),
+                {"langgraph_node": "model"},
+            ),
+            (
+                ToolMessage(content='{"wins": 32}', tool_call_id="call-1"),
+                {"langgraph_node": "tools"},
+            ),
+            (
+                AIMessageChunk(
+                    content=[{"type": "text", "text": "José Aldo has 32 wins."}]
+                ),
+                {"langgraph_node": "model"},
+            ),
+        ]
+    )
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+
+    tokens = list(
+        service.create_chat_completion(
+            [{"role": "user", "content": "How many wins does José Aldo have?"}]
+        )
+    )
+
+    assert tokens == ["José Aldo has 32 wins."]
 
 
 def test_create_chat_completion_reports_unavailable_server() -> None:
     request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
     agent = Mock()
-    agent.invoke.side_effect = httpx.ConnectError(
+    agent.stream.side_effect = httpx.ConnectError(
         "Connection refused", request=request
     )
     service = ModelService()
@@ -155,7 +225,9 @@ def test_create_chat_completion_reports_unavailable_server() -> None:
 
 def test_create_chat_completion_requires_final_assistant_message() -> None:
     agent = Mock()
-    agent.invoke.return_value = {"messages": [HumanMessage(content="Question")]}
+    agent.stream.return_value = iter(
+        [(HumanMessage(content="Question"), {"langgraph_node": "model"})]
+    )
     service = ModelService()
     service.chat_model = Mock()
     service.agent = agent
