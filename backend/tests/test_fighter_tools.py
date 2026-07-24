@@ -35,6 +35,8 @@ def test_tavily_news_client_returns_concise_headlines(
     }
     urlopen = Mock(return_value=JsonResponse(json.dumps(response).encode()))
     monkeypatch.setattr(fighter_tools_module, "urlopen", urlopen)
+    logger = Mock()
+    monkeypatch.setattr(fighter_tools_module, "logger", logger)
     client = TavilyNewsClient("tavily-key")
 
     result = client.get_recent_news("Max Holloway")
@@ -57,6 +59,18 @@ def test_tavily_news_client_returns_concise_headlines(
     assert body["query"] == "Max Holloway MMA fighter"
     assert body["topic"] == "news"
     assert body["max_results"] == 5
+    logger.info.assert_called_once_with(
+        "Tavily request payload: %s",
+        {
+            "query": "Max Holloway MMA fighter",
+            "topic": "news",
+            "days": 14,
+            "search_depth": "basic",
+            "max_results": 5,
+            "include_answer": False,
+            "include_raw_content": False,
+        },
+    )
 
 
 def test_tavily_news_client_requires_api_key() -> None:

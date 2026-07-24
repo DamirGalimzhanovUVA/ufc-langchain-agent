@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -6,6 +7,8 @@ from urllib.request import Request, urlopen
 from langchain_core.tools import BaseTool, StructuredTool
 
 from services.fighter_stats_provider import FighterStatsProvider
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class TavilyNewsClient:
@@ -19,17 +22,16 @@ class TavilyNewsClient:
         if not self.api_key:
             raise RuntimeError("TAVILY_API_KEY must be set")
 
-        body = json.dumps(
-            {
-                "query": f"{fighter_name} MMA fighter",
-                "topic": "news",
-                "days": 14,
-                "search_depth": "basic",
-                "max_results": 5,
-                "include_answer": False,
-                "include_raw_content": False,
-            }
-        ).encode()
+        payload = {
+            "query": f"{fighter_name} MMA fighter",
+            "topic": "news",
+            "days": 14,
+            "search_depth": "basic",
+            "max_results": 5,
+            "include_answer": False,
+            "include_raw_content": False,
+        }
+        body = json.dumps(payload).encode()
         request = Request(
             "https://api.tavily.com/search",
             data=body,
@@ -39,8 +41,9 @@ class TavilyNewsClient:
             },
             method="POST",
         )
+        logger.info("Tavily request payload: %s", payload)
         with urlopen(request, timeout=self.timeout_seconds) as response:
-            payload = json.load(response)
+            response_payload = json.load(response)
 
         headlines = [
             {
@@ -48,7 +51,7 @@ class TavilyNewsClient:
                 "url": result.get("url"),
                 "published_date": result.get("published_date"),
             }
-            for result in payload.get("results", [])
+            for result in response_payload.get("results", [])
             if isinstance(result, dict)
         ]
         return {"fighter": fighter_name, "headlines": headlines}
