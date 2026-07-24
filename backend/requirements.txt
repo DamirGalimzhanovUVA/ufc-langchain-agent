@@ -1,5 +1,6 @@
 fastapi
+langchain
 langchain-core
-llama-cpp-python
+langchain-openai
 pytest
 uvicorn[standard]

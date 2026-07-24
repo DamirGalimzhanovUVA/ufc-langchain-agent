@@ -1,47 +1,79 @@
-import json
 from unittest.mock import Mock
 
+import httpx
 import pytest
-from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 import services.model_service as model_service_module
-from services.model_service import LlamaCppChatModel, ModelService
+from services.model_service import ModelService, convert_messages
 
 
-def test_initialize_creates_model_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    model = Mock()
-    llama = Mock(return_value=model)
-    monkeypatch.setattr(model_service_module, "Llama", llama)
+def test_initialize_creates_model_and_agent_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chat_model = Mock()
+    chat_openai = Mock(return_value=chat_model)
+    agent = Mock()
+    create_agent = Mock(return_value=agent)
+    monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
+    monkeypatch.setattr(model_service_module, "create_agent", create_agent)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:9090/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen-local")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.2")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
     service = ModelService()
 
-    first_result = service.initialize("first-model.gguf")
-    second_result = service.initialize("second-model.gguf")
+    first_result = service.initialize()
+    second_result = service.initialize()
 
-    assert first_result is second_result
-    assert first_result.model is model
-    llama.assert_called_once_with(
-        model_path="first-model.gguf",
-        n_ctx=8192,
-        n_gpu_layers=-1,
-        verbose=True,
+    assert first_result is chat_model
+    assert second_result is chat_model
+    chat_openai.assert_called_once_with(
+        model="qwen-local",
+        base_url="http://localhost:9090/v1",
+        api_key="test-key",
+        temperature=0.2,
+        max_tokens=1024,
     )
-    assert service.get_model() is first_result
+    assert service.get_model() is chat_model
+    assert service.get_agent() is agent
     assert [tool.name for tool in service.tools] == [
         "fighter_news",
         "fighter_stats",
         "fighter_wikipedia",
     ]
+    create_agent.assert_called_once_with(
+        model=chat_model,
+        tools=service.tools,
+        system_prompt=model_service_module.SYSTEM_PROMPT,
+    )
 
 
-def test_get_model_returns_initialized_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    model = Mock()
-    monkeypatch.setattr(model_service_module, "Llama", Mock(return_value=model))
-    service = ModelService()
+def test_initialize_uses_local_server_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chat_openai = Mock(return_value=Mock())
+    monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
+    monkeypatch.setattr(model_service_module, "create_agent", Mock())
+    for variable in (
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "LLM_API_KEY",
+        "LLM_TEMPERATURE",
+        "LLM_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(variable, raising=False)
 
-    service.initialize("model.gguf")
+    ModelService().initialize()
 
-    assert service.get_model().model is model
+    chat_openai.assert_called_once_with(
+        model="local-model",
+        base_url="http://127.0.0.1:8080/v1",
+        api_key="local-key",
+        temperature=0.7,
+        max_tokens=2048,
+    )
 
 
 def test_get_model_raises_when_model_is_not_initialized() -> None:
@@ -51,177 +83,88 @@ def test_get_model_raises_when_model_is_not_initialized() -> None:
         service.get_model()
 
 
-def test_llama_cpp_chat_model_streams_assistant_response() -> None:
-    model = Mock()
-    model.create_chat_completion.return_value = iter(
+def test_convert_messages_preserves_supported_roles() -> None:
+    result = convert_messages(
         [
-            {"choices": [{"delta": {"content": "An API "}}]},
-            {"choices": [{"delta": {"content": "lets software communicate."}}]},
-            {"choices": [{"delta": {}}]},
+            {"role": "system", "content": "System instructions"},
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": "Earlier answer"},
         ]
     )
-    messages = [
-        SystemMessage("You are a helpful assistant."),
-        HumanMessage("What is an API?"),
+
+    assert result == [
+        SystemMessage(content="System instructions"),
+        HumanMessage(content="Question"),
+        AIMessage(content="Earlier answer"),
     ]
-    chat_model = LlamaCppChatModel(model=model)
-
-    tokens = [chunk.content for chunk in chat_model.stream(messages)]
-
-    assert tokens == ["An API ", "lets software communicate.", ""]
-    model.create_chat_completion.assert_called_once_with(
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "What is an API?"},
-        ],
-        stream=True,
-        max_tokens=2048,
-        stop=None,
-    )
 
 
-def test_llama_cpp_chat_model_parses_streamed_tool_call() -> None:
-    model = Mock()
-    model.create_chat_completion.return_value = iter(
-        [
-            {
-                "choices": [
-                    {
-                        "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": 0,
-                                    "id": "call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "fighter_stats",
-                                        "arguments": '{"fighter_name":',
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                ]
-            },
-            {
-                "choices": [
-                    {
-                        "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": 0,
-                                    "function": {
-                                        "arguments": '"Amanda Nunes"}'
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                ]
-            },
+def test_convert_messages_rejects_unsupported_role() -> None:
+    with pytest.raises(ValueError, match="Unsupported chat message role: tool"):
+        convert_messages([{"role": "tool", "content": "result"}])
+
+
+def test_create_chat_completion_returns_last_textual_assistant_message() -> None:
+    agent = Mock()
+    agent.invoke.return_value = {
+        "messages": [
+            HumanMessage(content="Question"),
+            AIMessage(content="Earlier answer"),
+            AIMessage(content=[{"type": "text", "text": "Final answer"}]),
         ]
-    )
-    chat_model = LlamaCppChatModel(model=model)
-
-    response = chat_model.invoke(
-        [HumanMessage("What is Amanda Nunes's record?")],
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "fighter_stats",
-                    "description": "Get fighter statistics.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "fighter_name": {"type": "string"}
-                        },
-                        "required": ["fighter_name"],
-                    },
-                },
-            }
-        ],
-    )
-
-    assert response.tool_calls == [
-        {
-            "name": "fighter_stats",
-            "args": {"fighter_name": "Amanda Nunes"},
-            "id": "call-1",
-            "type": "tool_call",
-        }
-    ]
-
-
-def test_create_chat_completion_uses_langchain_chat_model() -> None:
-    chat_model = Mock()
-    chat_model.stream.return_value = iter(
-        [
-            AIMessageChunk(content="An API "),
-            AIMessageChunk(content="lets software communicate."),
-        ]
-    )
-    service = ModelService()
-    service.chat_model = chat_model
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "What is an API?"},
-    ]
-
-    tokens = list(service.create_chat_completion(messages))
-
-    assert tokens == ["An API ", "lets software communicate."]
-    chat_model.stream.assert_called_once_with(messages)
-
-
-def test_create_chat_completion_registers_and_executes_tools() -> None:
-    def get_fighter_stats(fighter_name: str) -> dict[str, object]:
-        """Get fighter statistics."""
-        return {"fighter": fighter_name, "wins": 30}
-
-    tool = StructuredTool.from_function(
-        get_fighter_stats, name="fighter_stats"
-    )
-    bound_model = Mock()
-    bound_model.stream.side_effect = [
-        iter(
-            [
-                AIMessageChunk(
-                    content="",
-                    tool_call_chunks=[
-                        {
-                            "name": "fighter_stats",
-                            "args": '{"fighter_name": "José Aldo"}',
-                            "id": "call-1",
-                            "index": 0,
-                        }
-                    ],
-                )
-            ]
-        ),
-        iter(
-            [
-                AIMessageChunk(content="José Aldo has "),
-                AIMessageChunk(content="30 wins."),
-            ]
-        ),
-    ]
-    chat_model = Mock()
-    chat_model.bind_tools.return_value = bound_model
-    service = ModelService()
-    service.chat_model = chat_model
-    service.tools = [tool]
-    messages = [{"role": "user", "content": "How many wins does José Aldo have?"}]
-
-    tokens = list(service.create_chat_completion(messages))
-
-    assert tokens == ["José Aldo has ", "30 wins."]
-    chat_model.bind_tools.assert_called_once_with([tool])
-    first_messages = bound_model.stream.call_args_list[0].args[0]
-    second_messages = bound_model.stream.call_args_list[1].args[0]
-    assert first_messages == messages
-    assert second_messages[-1].tool_call_id == "call-1"
-    assert json.loads(second_messages[-1].content) == {
-        "fighter": "José Aldo",
-        "wins": 30,
     }
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+    messages = [{"role": "user", "content": "Question"}]
+
+    tokens = list(service.create_chat_completion(messages))
+
+    assert tokens == ["Final answer"]
+    invocation = agent.invoke.call_args
+    assert invocation.args[0] == {
+        "messages": [HumanMessage(content="Question")]
+    }
+    assert invocation.kwargs == {"config": {"recursion_limit": 10}}
+
+
+def test_create_chat_completion_reports_unavailable_server() -> None:
+    request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
+    agent = Mock()
+    agent.invoke.side_effect = httpx.ConnectError(
+        "Connection refused", request=request
+    )
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+    service.base_url = "http://127.0.0.1:8080/v1"
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "local model server is unavailable at "
+            "http://127.0.0.1:8080/v1"
+        ),
+    ):
+        list(
+            service.create_chat_completion(
+                [{"role": "user", "content": "Question"}]
+            )
+        )
+
+
+def test_create_chat_completion_requires_final_assistant_message() -> None:
+    agent = Mock()
+    agent.invoke.return_value = {"messages": [HumanMessage(content="Question")]}
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+
+    with pytest.raises(
+        RuntimeError, match="agent did not return an assistant response"
+    ):
+        list(
+            service.create_chat_completion(
+                [{"role": "user", "content": "Question"}]
+            )
+        )

@@ -1,4 +1,3 @@
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,11 +19,7 @@ class ChatRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    model_path = os.environ.get("LLAMA_MODEL_PATH")
-    if model_path is None:
-        raise RuntimeError("LLAMA_MODEL_PATH must be set")
-
-    model_service.initialize(model_path)
+    model_service.initialize()
     app.state.model_service = model_service
     yield
 

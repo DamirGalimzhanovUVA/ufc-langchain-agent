@@ -11,7 +11,6 @@ def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
     service.create_chat_completion.return_value = iter(
         ["An API ", "lets software communicate."]
     )
-    monkeypatch.setenv("LLAMA_MODEL_PATH", "model.gguf")
     monkeypatch.setattr(main, "model_service", service)
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
@@ -25,13 +24,12 @@ def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/plain; charset=utf-8"
     assert body == "An API lets software communicate."
-    service.initialize.assert_called_once_with("model.gguf")
+    service.initialize.assert_called_once_with()
     service.create_chat_completion.assert_called_once_with(messages)
 
 
 def test_chat_rejects_invalid_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     service = Mock()
-    monkeypatch.setenv("LLAMA_MODEL_PATH", "model.gguf")
     monkeypatch.setattr(main, "model_service", service)
 
     with TestClient(main.app) as client:

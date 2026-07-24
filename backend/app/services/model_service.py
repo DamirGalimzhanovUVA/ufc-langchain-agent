@@ -1,24 +1,19 @@
-import json
 import os
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models.chat_models import (
-    BaseChatModel,
-    generate_from_stream,
-)
+import httpx
+from langchain.agents import create_agent
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
-    AIMessageChunk,
     BaseMessage,
-    ToolMessage,
-    convert_to_openai_messages,
+    HumanMessage,
+    SystemMessage,
 )
-from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.tools import BaseTool
-from langchain_core.utils.function_calling import convert_to_openai_tool
-from llama_cpp import Llama
+from langchain_openai import ChatOpenAI
+from openai import APIConnectionError
 
 from services.fighter_stats_provider import HttpFighterStatsProvider
 from services.fighter_tools import (
@@ -29,103 +24,83 @@ from services.fighter_tools import (
 
 ChatMessage = dict[str, str]
 
+SYSTEM_PROMPT = """You are a UFC research assistant.
+Use the Wikipedia tool for fighter background and career information.
+Use the fighter stats tool for structured fighter statistics.
+Use the Tavily news tool for recent developments.
+Do not call tools when the answer can be produced from the existing conversation.
+If a tool fails, explain the failure instead of inventing results.
+After using tools, produce a normal user-facing answer."""
 
-class LlamaCppChatModel(BaseChatModel):
-    model: Any
-    max_tokens: int = 2048
 
-    @property
-    def _llm_type(self) -> str:
-        return "existing-llama-cpp"
+def convert_messages(messages: list[ChatMessage]) -> list[BaseMessage]:
+    converted_messages: list[BaseMessage] = []
+    message_types = {
+        "system": SystemMessage,
+        "user": HumanMessage,
+        "assistant": AIMessage,
+    }
 
-    def bind_tools(
-        self,
-        tools: list[dict[str, Any] | type | Any | BaseTool],
-        *,
-        tool_choice: str | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        formatted_tools = [convert_to_openai_tool(tool) for tool in tools]
-        if tool_choice is not None:
-            kwargs["tool_choice"] = tool_choice
-        return self.bind(tools=formatted_tools, **kwargs)
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if role not in message_types:
+            raise ValueError(f"Unsupported chat message role: {role}")
+        if not isinstance(content, str):
+            raise ValueError("Chat message content must be a string")
+        converted_messages.append(message_types[role](content=content))
 
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        return generate_from_stream(
-            self._stream(messages, stop, run_manager, **kwargs)
-        )
+    return converted_messages
 
-    def _stream(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> Iterator[ChatGenerationChunk]:
-        message_dicts = cast(
-            list[dict[str, Any]], convert_to_openai_messages(messages)
-        )
-        completion_kwargs = {"max_tokens": self.max_tokens, **kwargs}
-        completion = self.model.create_chat_completion(
-            messages=message_dicts,
-            stream=True,
-            stop=stop,
-            **completion_kwargs,
-        )
 
-        for raw_chunk in cast(Iterator[dict[str, Any]], completion):
-            choices = raw_chunk.get("choices", [])
-            if not choices:
-                continue
+def get_text_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
 
-            delta = choices[0].get("delta") or {}
-            content = delta.get("content")
-            tool_call_chunks = [
-                {
-                    "name": tool_call.get("function", {}).get("name"),
-                    "args": tool_call.get("function", {}).get("arguments"),
-                    "id": tool_call.get("id"),
-                    "index": tool_call.get("index"),
-                }
-                for tool_call in delta.get("tool_calls", [])
-            ]
-            if (
-                (not isinstance(content, str) or not content)
-                and not tool_call_chunks
-            ):
-                continue
+    text_parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            text_parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+    return "".join(text_parts)
 
-            chunk = ChatGenerationChunk(
-                message=AIMessageChunk(
-                    content=content if isinstance(content, str) else "",
-                    tool_call_chunks=tool_call_chunks,
-                )
-            )
-            if run_manager is not None and isinstance(content, str) and content:
-                run_manager.on_llm_new_token(content, chunk=chunk)
-            yield chunk
+
+def is_server_connection_error(error: BaseException) -> bool:
+    current_error: BaseException | None = error
+    while current_error is not None:
+        if isinstance(
+            current_error,
+            (APIConnectionError, httpx.ConnectError, httpx.TimeoutException),
+        ):
+            return True
+        current_error = current_error.__cause__ or current_error.__context__
+    return False
 
 
 class ModelService:
     def __init__(self) -> None:
         self.chat_model: BaseChatModel | None = None
+        self.agent: Any = None
         self.tools: list[BaseTool] = []
+        self.base_url = ""
 
-    def initialize(self, model_path: str) -> BaseChatModel:
+    def initialize(self) -> BaseChatModel:
         if self.chat_model is None:
-            llama_model = Llama(
-                model_path=model_path,
-                n_ctx=8192,
-                n_gpu_layers=-1,
-                verbose=True,
+            self.base_url = os.getenv(
+                "LLM_BASE_URL", "http://127.0.0.1:8080/v1"
             )
-            self.chat_model = LlamaCppChatModel(model=llama_model)
+            self.chat_model = ChatOpenAI(
+                model=os.getenv("LLM_MODEL", "local-model"),
+                base_url=self.base_url,
+                api_key=os.getenv("LLM_API_KEY", "local-key"),
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
+            )
             stats_provider = HttpFighterStatsProvider(
                 api_key=os.environ.get("FIGHTER_STATS_API_KEY"),
             )
@@ -133,6 +108,11 @@ class ModelService:
                 news_client=TavilyNewsClient(os.environ.get("TAVILY_API_KEY")),
                 stats_provider=stats_provider,
                 wikipedia_client=WikipediaClient(),
+            )
+            self.agent = create_agent(
+                model=self.chat_model,
+                tools=self.tools,
+                system_prompt=SYSTEM_PROMPT,
             )
 
         return self.chat_model
@@ -143,51 +123,41 @@ class ModelService:
 
         return self.chat_model
 
-    def create_chat_completion(self, messages: list[ChatMessage]) -> Iterator[str]:
-        model = self.get_model()
-        tool_model = model.bind_tools(self.tools) if self.tools else model
-        tools_by_name = {tool.name: tool for tool in self.tools}
-        conversation: list[Any] = list(messages)
-        tool_rounds_remaining = 5
+    def get_agent(self) -> Any:
+        self.get_model()
+        if self.agent is None:
+            raise RuntimeError("The agent has not been initialized")
+        return self.agent
 
-        while tool_rounds_remaining > 0:
-            tool_rounds_remaining -= 1
-            chunks = list(tool_model.stream(list(conversation)))
-            if not chunks:
+    def create_chat_completion(
+        self, messages: list[ChatMessage]
+    ) -> Iterator[str]:
+        agent = self.get_agent()
+        agent_messages = convert_messages(messages)
+
+        try:
+            result = agent.invoke(
+                {"messages": agent_messages},
+                config={"recursion_limit": 10},
+            )
+        except Exception as error:
+            if is_server_connection_error(error):
+                raise RuntimeError(
+                    "The local model server is unavailable at "
+                    f"{self.base_url}. Start llama-server and try again."
+                ) from None
+            raise
+
+        result_messages = result.get("messages", [])
+        for message in reversed(result_messages):
+            if not isinstance(message, AIMessage):
+                continue
+            content = get_text_content(message.content)
+            if content:
+                yield content
                 return
 
-            response = cast(AIMessage, chunks[0])
-            for chunk in chunks[1:]:
-                response = response + chunk
-
-            if not response.tool_calls:
-                for chunk in chunks:
-                    content = chunk.content
-                    if isinstance(content, str) and content:
-                        yield content
-                return
-
-            conversation.append(response)
-            for tool_call in response.tool_calls:
-                tool = tools_by_name.get(tool_call["name"])
-                if tool is None:
-                    result: Any = {
-                        "error": f"Unknown tool: {tool_call['name']}"
-                    }
-                else:
-                    try:
-                        result = tool.invoke(tool_call["args"])
-                    except Exception as error:
-                        result = {"error": str(error)}
-
-                conversation.append(
-                    ToolMessage(
-                        content=json.dumps(result),
-                        tool_call_id=tool_call["id"],
-                    )
-                )
-
-        yield "I could not complete the request after several tool calls."
+        raise RuntimeError("The agent did not return an assistant response")
 
 
 model_service = ModelService()
