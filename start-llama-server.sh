@@ -2,6 +2,15 @@
 
 set -eu
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+env_file="${ENV_FILE:-$script_dir/.env}"
+
+if [ -f "$env_file" ]; then
+    set -a
+    . "$env_file"
+    set +a
+fi
+
 if [ -z "${MODEL_PATH:-}" ]; then
     echo "Error: MODEL_PATH must be set to a GGUF model file." >&2
     exit 1

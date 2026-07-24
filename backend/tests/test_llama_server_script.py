@@ -39,6 +39,35 @@ def test_llama_server_script_rejects_missing_model_file() -> None:
     assert "MODEL_PATH does not exist or is not a file" in result.stderr
 
 
+def test_llama_server_script_loads_configured_env_file(
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "model.gguf"
+    model_path.touch()
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"MODEL_PATH='{model_path}'\n")
+    bin_path = tmp_path / "bin"
+    bin_path.mkdir()
+    llama_server_path = bin_path / "llama-server"
+    llama_server_path.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+    llama_server_path.chmod(0o755)
+    environment = os.environ.copy()
+    environment.pop("MODEL_PATH", None)
+    environment["ENV_FILE"] = str(env_file)
+    environment["PATH"] = f"{bin_path}:{environment['PATH']}"
+
+    result = subprocess.run(
+        [str(SCRIPT_PATH)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[:2] == ["--model", str(model_path)]
+
+
 def test_llama_server_script_starts_server_with_configured_arguments(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

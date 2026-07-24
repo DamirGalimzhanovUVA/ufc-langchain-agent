@@ -1,10 +1,27 @@
 import asyncio
+import os
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI
 
 import main
+
+
+def test_load_environment_reads_configured_env_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_MODEL=test-model\n")
+    monkeypatch.setenv("ENV_FILE", str(env_file))
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    main.load_environment()
+
+    assert os.environ["LLM_MODEL"] == "test-model"
+    monkeypatch.delenv("LLM_MODEL")
 
 
 def test_lifespan_initializes_and_stores_model_service(
