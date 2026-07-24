@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
@@ -9,6 +10,8 @@ from services.fighter_tools import (
     TavilyNewsClient,
     WikipediaClient,
     create_fighter_tools,
+    extract_fight_description,
+    get_fight_description,
 )
 
 
@@ -130,6 +133,102 @@ def test_wikipedia_client_returns_page_summary(
     assert "action=query" in request.full_url
 
 
+def test_extract_fight_description_uses_main_article_intro() -> None:
+    asset_path = (
+        Path(__file__).parents[1]
+        / "assets"
+        / "ufc-white-house-live-blog-alex-pereira-vs-ciryl-gane.html"
+    )
+
+    description = extract_fight_description(asset_path.read_text())
+
+    assert description.startswith(
+        "This is the UFC White House live blog for Alex Pereira vs. Ciryl Gane"
+    )
+    assert "Pereira (13-3) is currently No. 3" in description
+    assert "Standing in Pereira’s way is Gane (13-2, 1 NC)" in description
+    assert "Check out the UFC White House live blog" not in description
+    assert "Round 1" not in description
+
+
+def test_get_fight_description_searches_and_scrapes_mmafighting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <main id="content">
+      <article>
+        <div id="zephr-anchor">
+          <div class="duet--article--article-body-component">
+            <p class="duet--article--standard-paragraph">
+              Fighter One meets Fighter Two in the main event.
+            </p>
+          </div>
+          <div class="duet--article--article-body-component"><h2>Round 1</h2></div>
+          <div class="duet--article--article-body-component">
+            <p class="duet--article--standard-paragraph">Live updates.</p>
+          </div>
+        </div>
+      </article>
+    </main>
+    """
+    article_url = (
+        "https://www.mmafighting.com/ufc/123/fighter-one-vs-fighter-two"
+    )
+    tavily_client = Mock()
+    tavily_client.search.return_value = {
+        "results": [
+            {"url": "https://example.com/unrelated"},
+            {"url": article_url},
+        ]
+    }
+    urlopen = Mock(return_value=JsonResponse(html.encode()))
+    monkeypatch.setattr(fighter_tools_module, "urlopen", urlopen)
+    query = "Fighter One vs Fighter Two live blog"
+
+    result = get_fight_description(query, tavily_client)
+
+    assert result == {
+        "query": query,
+        "found": True,
+        "url": article_url,
+        "description": "Fighter One meets Fighter Two in the main event.",
+    }
+    tavily_client.search.assert_called_once_with(
+        query=query,
+        search_depth="advanced",
+        include_domains=["mmafighting.com"],
+    )
+    request = urlopen.call_args.args[0]
+    assert request.full_url == article_url
+    assert request.get_header("User-agent") == "ufc-langchain-chat/1.0"
+
+
+def test_get_fight_description_returns_not_found_without_article_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tavily_client = Mock()
+    tavily_client.search.return_value = {
+        "results": [{"url": "https://example.com/unrelated"}]
+    }
+    urlopen = Mock()
+    monkeypatch.setattr(fighter_tools_module, "urlopen", urlopen)
+
+    result = get_fight_description("missing fight live blog", tavily_client)
+
+    assert result == {
+        "query": "missing fight live blog",
+        "found": False,
+        "url": None,
+        "description": None,
+    }
+    urlopen.assert_not_called()
+
+
+def test_get_fight_description_requires_api_key_client() -> None:
+    with pytest.raises(RuntimeError, match="TAVILY_API_KEY must be set"):
+        get_fight_description("Fighter One vs Fighter Two live blog", None)
+
+
 def test_tools_delegate_to_injected_clients_and_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -141,8 +240,10 @@ def test_tools_delegate_to_injected_clients_and_provider(
     stats_provider.get_fighter_stats.return_value = {"wins": 30}
     wikipedia_client = Mock()
     wikipedia_client.get_fighter_page.return_value = {"found": True}
+    tavily_client = Mock()
+    tavily_client.search.return_value = {"results": []}
     tools = create_fighter_tools(
-        news_client, stats_provider, wikipedia_client
+        news_client, stats_provider, wikipedia_client, tavily_client
     )
     tools_by_name = {tool.name: tool for tool in tools}
 
@@ -155,6 +256,9 @@ def test_tools_delegate_to_injected_clients_and_provider(
     wikipedia_result = tools_by_name["fighter_wikipedia"].invoke(
         {"fighter_name": "José Aldo"}
     )
+    fight_description_result = tools_by_name["fight_description"].invoke(
+        {"query": "José Aldo vs Conor McGregor live blog"}
+    )
 
     assert news_result == {"results": []}
     news_client.search_news.assert_called_once_with(
@@ -165,6 +269,17 @@ def test_tools_delegate_to_injected_clients_and_provider(
         "stats": {"wins": 30},
     }
     assert wikipedia_result == {"found": True}
+    assert fight_description_result == {
+        "query": "José Aldo vs Conor McGregor live blog",
+        "found": False,
+        "url": None,
+        "description": None,
+    }
+    tavily_client.search.assert_called_once_with(
+        query="José Aldo vs Conor McGregor live blog",
+        search_depth="advanced",
+        include_domains=["mmafighting.com"],
+    )
     logger.info.assert_has_calls(
         [
             call(
@@ -203,6 +318,21 @@ def test_tools_delegate_to_injected_clients_and_provider(
                 "Tool result: name=%s result=%s",
                 "fighter_wikipedia",
                 {"found": True},
+            ),
+            call(
+                "Tool call: name=%s arguments=%s",
+                "fight_description",
+                {"query": "José Aldo vs Conor McGregor live blog"},
+            ),
+            call(
+                "Tool result: name=%s result=%s",
+                "fight_description",
+                {
+                    "query": "José Aldo vs Conor McGregor live blog",
+                    "found": False,
+                    "url": None,
+                    "description": None,
+                },
             ),
         ]
     )
