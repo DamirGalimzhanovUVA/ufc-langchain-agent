@@ -135,8 +135,7 @@ def create_fighter_tools(
                 "Search MMA news for recent events, statements, interviews, "
                 "announcements, or current coverage. Generate a focused, "
                 "standalone search query that preserves every person and topic "
-                "from the user's question. If previous results were not relevant, "
-                "refine the query to target the missing information."
+                "from the user's question."
             ),
         ),
         StructuredTool.from_function(
