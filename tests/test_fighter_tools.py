@@ -59,7 +59,7 @@ def test_tavily_news_client_searches_model_generated_query_without_day_limit(
     body = json.loads(request.data)
     assert "api_key" not in body
     assert body["query"] == query
-    assert body["topic"] == "news"
+    assert body["topic"] == "general"
     assert "days" not in body
     assert body["max_results"] == 5
     logger.info.assert_has_calls(
@@ -68,7 +68,7 @@ def test_tavily_news_client_searches_model_generated_query_without_day_limit(
                 "Tavily request payload: %s",
                 {
                     "query": query,
-                    "topic": "news",
+                    "topic": "general",
                     "search_depth": "basic",
                     "max_results": 5,
                     "include_answer": False,

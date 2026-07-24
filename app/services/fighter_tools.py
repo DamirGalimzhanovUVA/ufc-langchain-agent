@@ -24,7 +24,7 @@ class TavilyNewsClient:
 
         payload = {
             "query": query,
-            "topic": "news",
+            "topic": "general",
             "search_depth": "basic",
             "max_results": 5,
             "include_answer": False,
