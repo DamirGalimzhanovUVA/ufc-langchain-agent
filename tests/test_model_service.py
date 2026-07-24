@@ -63,7 +63,10 @@ def test_initialize_creates_model_and_agent_once(
         model=chat_model,
         tools=service.tools,
         system_prompt=model_service_module.SYSTEM_PROMPT,
-        middleware=[tool_call_limit.return_value],
+        middleware=[
+            model_service_module.log_news_search_decision,
+            tool_call_limit.return_value,
+        ],
     )
 
 
@@ -76,6 +79,79 @@ def test_system_prompt_requires_up_to_two_relevant_news_retries() -> None:
     )
     assert "maximum of three Tavily searches per user request" in (
         model_service_module.SYSTEM_PROMPT
+    )
+
+
+def test_news_search_decision_logs_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = Mock()
+    monkeypatch.setattr(model_service_module, "logger", logger)
+    state = {
+        "messages": [
+            HumanMessage(content="What did Makhachev say about Garry?"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "fighter_news",
+                        "args": {"query": "first query"},
+                        "id": "call-1",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content='{"results": []}',
+                name="fighter_news",
+                tool_call_id="call-1",
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "fighter_news",
+                        "args": {"query": "refined query"},
+                        "id": "call-2",
+                    }
+                ],
+            ),
+        ]
+    }
+
+    model_service_module.log_news_search_decision.after_model(state, Mock())
+
+    logger.info.assert_called_once_with(
+        "Model news search decision: action=%s next_queries=%s response=%r",
+        "retry",
+        ["refined query"],
+        "",
+    )
+
+
+def test_news_search_decision_logs_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = Mock()
+    monkeypatch.setattr(model_service_module, "logger", logger)
+    response = "No direct comment was found."
+    state = {
+        "messages": [
+            ToolMessage(
+                content='{"results": []}',
+                name="fighter_news",
+                tool_call_id="call-1",
+            ),
+            AIMessage(content=response),
+        ]
+    }
+
+    model_service_module.log_news_search_decision.after_model(state, Mock())
+
+    logger.info.assert_called_once_with(
+        "Model news search decision: action=%s next_queries=%s response=%r",
+        "stop",
+        [],
+        response,
     )
 
 

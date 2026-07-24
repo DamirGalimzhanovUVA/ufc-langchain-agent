@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 from langchain.agents import create_agent
-from langchain.agents.middleware import ToolCallLimitMiddleware
+from langchain.agents.middleware import ToolCallLimitMiddleware, after_model
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -13,6 +13,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
@@ -42,6 +43,42 @@ answer could not be found.
 Do not call tools when the answer can be produced from the existing conversation.
 If a tool fails, explain the failure instead of inventing results.
 After using tools, produce a normal user-facing answer."""
+
+
+@after_model
+def log_news_search_decision(
+    state: dict[str, Any], runtime: Any
+) -> None:
+    messages = state.get("messages", [])
+    if not messages or not isinstance(messages[-1], AIMessage):
+        return
+
+    received_news_results = False
+    for message in reversed(messages[:-1]):
+        if not isinstance(message, ToolMessage):
+            break
+        if message.name == "fighter_news":
+            received_news_results = True
+
+    if not received_news_results:
+        return
+
+    model_message = messages[-1]
+    retry_queries = [
+        tool_call.get("args", {}).get("query")
+        for tool_call in model_message.tool_calls
+        if tool_call.get("name") == "fighter_news"
+    ]
+    retry_queries = [
+        query for query in retry_queries if isinstance(query, str)
+    ]
+    action = "retry" if retry_queries else "stop"
+    logger.info(
+        "Model news search decision: action=%s next_queries=%s response=%r",
+        action,
+        retry_queries,
+        model_message.content,
+    )
 
 
 def convert_messages(messages: list[ChatMessage]) -> list[BaseMessage]:
@@ -125,6 +162,7 @@ class ModelService:
                 tools=self.tools,
                 system_prompt=SYSTEM_PROMPT,
                 middleware=[
+                    log_news_search_decision,
                     ToolCallLimitMiddleware(
                         tool_name="fighter_news",
                         run_limit=3,

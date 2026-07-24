@@ -1,6 +1,6 @@
 import io
 import json
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -62,16 +62,34 @@ def test_tavily_news_client_searches_model_generated_query_without_day_limit(
     assert body["topic"] == "news"
     assert "days" not in body
     assert body["max_results"] == 5
-    logger.info.assert_called_once_with(
-        "Tavily request payload: %s",
-        {
-            "query": query,
-            "topic": "news",
-            "search_depth": "basic",
-            "max_results": 5,
-            "include_answer": False,
-            "include_raw_content": False,
-        },
+    logger.info.assert_has_calls(
+        [
+            call(
+                "Tavily request payload: %s",
+                {
+                    "query": query,
+                    "topic": "news",
+                    "search_depth": "basic",
+                    "max_results": 5,
+                    "include_answer": False,
+                    "include_raw_content": False,
+                },
+            ),
+            call(
+                "Tavily search results for query %r: %s",
+                query,
+                [
+                    {
+                        "title": "Fight announced",
+                        "url": "https://news.example/fight",
+                        "published_date": "2026-07-22",
+                        "content": (
+                            "Article excerpt describing the reported statement."
+                        ),
+                    }
+                ],
+            ),
+        ]
     )
 
 

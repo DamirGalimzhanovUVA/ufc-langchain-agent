@@ -54,6 +54,11 @@ class TavilyNewsClient:
             for result in response_payload.get("results", [])
             if isinstance(result, dict)
         ]
+        logger.info(
+            "Tavily search results for query %r: %s",
+            query,
+            results,
+        )
         return {"query": query, "results": results}
 
 
