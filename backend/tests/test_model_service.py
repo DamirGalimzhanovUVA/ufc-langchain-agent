@@ -53,6 +53,7 @@ def test_initialize_creates_model_and_agent_once(
         "fighter_news",
         "fighter_stats",
         "fighter_wikipedia",
+        "fight_description",
     ]
     tool_call_limit.assert_called_once_with(
         tool_name="fighter_news",

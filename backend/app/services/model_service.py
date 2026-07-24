@@ -32,6 +32,8 @@ logger = logging.getLogger("uvicorn.error")
 SYSTEM_PROMPT = """You are a UFC research assistant.
 Use the Wikipedia tool for fighter background and career information.
 Use the fighter stats tool for structured fighter statistics.
+Use the fight description tool when asked for the background, stakes, or
+description of a specific matchup covered by an MMA Fighting live blog.
 Use the Tavily news tool for recent developments. When using it, generate a
 focused, standalone search query that preserves every person and topic from the
 user's question. After each search, determine whether the result content answers
@@ -152,10 +154,12 @@ class ModelService:
             stats_provider = HttpFighterStatsProvider(
                 api_key=os.environ.get("FIGHTER_STATS_API_KEY"),
             )
+            tavily_api_key = os.environ.get("TAVILY_API_KEY")
             self.tools = create_fighter_tools(
-                news_client=TavilyNewsClient(os.environ.get("TAVILY_API_KEY")),
+                news_client=TavilyNewsClient(tavily_api_key),
                 stats_provider=stats_provider,
                 wikipedia_client=WikipediaClient(),
+                tavily_api_key=tavily_api_key,
             )
             self.agent = create_agent(
                 model=self.chat_model,
