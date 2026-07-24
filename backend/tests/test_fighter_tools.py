@@ -203,6 +203,7 @@ def test_get_fight_description_searches_and_scrapes_mmafighting(
         "https://api.tavily.com/search",
         json={
             "query": query,
+            "topic": "general",
             "search_depth": "advanced",
             "include_domains": ["mmafighting.com"],
         },
@@ -223,6 +224,7 @@ def test_get_fight_description_searches_and_scrapes_mmafighting(
                     "https://api.tavily.com/search",
                 {
                     "query": query,
+                    "topic": "general",
                     "search_depth": "advanced",
                     "include_domains": ["mmafighting.com"],
                 },
@@ -320,6 +322,7 @@ def test_tools_delegate_to_injected_clients_and_provider(
         "https://api.tavily.com/search",
         json={
             "query": "José Aldo vs Conor McGregor live blog",
+            "topic": "general",
             "search_depth": "advanced",
             "include_domains": ["mmafighting.com"],
         },
@@ -373,9 +376,10 @@ def test_tools_delegate_to_injected_clients_and_provider(
             call(
                 "Tavily fight description request: url=%s payload=%s",
                 "https://api.tavily.com/search",
-                {
-                    "query": "José Aldo vs Conor McGregor live blog",
-                    "search_depth": "advanced",
+                    {
+                        "query": "José Aldo vs Conor McGregor live blog",
+                        "topic": "general",
+                        "search_depth": "advanced",
                         "include_domains": ["mmafighting.com"],
                     },
                 ),

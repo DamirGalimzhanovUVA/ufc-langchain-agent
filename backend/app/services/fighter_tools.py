@@ -151,6 +151,7 @@ def get_fight_description(
 
     payload = {
         "query": query,
+        "topic": "general",
         "search_depth": "advanced",
         "include_domains": ["mmafighting.com"],
     }
