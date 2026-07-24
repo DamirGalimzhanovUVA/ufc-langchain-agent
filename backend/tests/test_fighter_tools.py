@@ -20,7 +20,7 @@ class JsonResponse(io.BytesIO):
         self.close()
 
 
-def test_tavily_news_client_returns_concise_headlines(
+def test_tavily_news_client_searches_model_generated_query_without_day_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     response = {
@@ -29,7 +29,7 @@ def test_tavily_news_client_returns_concise_headlines(
                 "title": "Fight announced",
                 "url": "https://news.example/fight",
                 "published_date": "2026-07-22",
-                "content": "Long article content that should not be returned.",
+                "content": "Article excerpt describing the reported statement.",
             }
         ]
     }
@@ -38,16 +38,18 @@ def test_tavily_news_client_returns_concise_headlines(
     logger = Mock()
     monkeypatch.setattr(fighter_tools_module, "logger", logger)
     client = TavilyNewsClient("tavily-key")
+    query = "What did Makhachev say about Ian Garry's fighting style?"
 
-    result = client.get_recent_news("Max Holloway")
+    result = client.search_news(query)
 
     assert result == {
-        "fighter": "Max Holloway",
-        "headlines": [
+        "query": query,
+        "results": [
             {
                 "title": "Fight announced",
                 "url": "https://news.example/fight",
                 "published_date": "2026-07-22",
+                "content": "Article excerpt describing the reported statement.",
             }
         ],
     }
@@ -56,15 +58,15 @@ def test_tavily_news_client_returns_concise_headlines(
     assert request.get_header("Authorization") == "Bearer tavily-key"
     body = json.loads(request.data)
     assert "api_key" not in body
-    assert body["query"] == "Max Holloway MMA fighter"
+    assert body["query"] == query
     assert body["topic"] == "news"
+    assert "days" not in body
     assert body["max_results"] == 5
     logger.info.assert_called_once_with(
         "Tavily request payload: %s",
         {
-            "query": "Max Holloway MMA fighter",
+            "query": query,
             "topic": "news",
-            "days": 14,
             "search_depth": "basic",
             "max_results": 5,
             "include_answer": False,
@@ -77,7 +79,7 @@ def test_tavily_news_client_requires_api_key() -> None:
     client = TavilyNewsClient(None)
 
     with pytest.raises(RuntimeError, match="TAVILY_API_KEY must be set"):
-        client.get_recent_news("Max Holloway")
+        client.search_news("Max Holloway latest news")
 
 
 def test_wikipedia_client_returns_page_summary(
@@ -112,7 +114,7 @@ def test_wikipedia_client_returns_page_summary(
 
 def test_tools_delegate_to_injected_clients_and_provider() -> None:
     news_client = Mock()
-    news_client.get_recent_news.return_value = {"headlines": []}
+    news_client.search_news.return_value = {"results": []}
     stats_provider = Mock()
     stats_provider.get_fighter_stats.return_value = {"wins": 30}
     wikipedia_client = Mock()
@@ -123,7 +125,7 @@ def test_tools_delegate_to_injected_clients_and_provider() -> None:
     tools_by_name = {tool.name: tool for tool in tools}
 
     news_result = tools_by_name["fighter_news"].invoke(
-        {"fighter_name": "José Aldo"}
+        {"query": "What did José Aldo say about retirement?"}
     )
     stats_result = tools_by_name["fighter_stats"].invoke(
         {"fighter_name": "José Aldo"}
@@ -132,7 +134,10 @@ def test_tools_delegate_to_injected_clients_and_provider() -> None:
         {"fighter_name": "José Aldo"}
     )
 
-    assert news_result == {"headlines": []}
+    assert news_result == {"results": []}
+    news_client.search_news.assert_called_once_with(
+        "What did José Aldo say about retirement?"
+    )
     assert stats_result == {
         "fighter": "José Aldo",
         "stats": {"wins": 30},

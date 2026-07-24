@@ -18,14 +18,13 @@ class TavilyNewsClient:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
 
-    def get_recent_news(self, fighter_name: str) -> dict[str, Any]:
+    def search_news(self, query: str) -> dict[str, Any]:
         if not self.api_key:
             raise RuntimeError("TAVILY_API_KEY must be set")
 
         payload = {
-            "query": f"{fighter_name} MMA fighter",
+            "query": query,
             "topic": "news",
-            "days": 14,
             "search_depth": "basic",
             "max_results": 5,
             "include_answer": False,
@@ -45,16 +44,17 @@ class TavilyNewsClient:
         with urlopen(request, timeout=self.timeout_seconds) as response:
             response_payload = json.load(response)
 
-        headlines = [
+        results = [
             {
                 "title": result.get("title"),
                 "url": result.get("url"),
                 "published_date": result.get("published_date"),
+                "content": result.get("content"),
             }
             for result in response_payload.get("results", [])
             if isinstance(result, dict)
         ]
-        return {"fighter": fighter_name, "headlines": headlines}
+        return {"query": query, "results": results}
 
 
 class WikipediaClient:
@@ -112,9 +112,9 @@ def create_fighter_tools(
     stats_provider: FighterStatsProvider,
     wikipedia_client: WikipediaClient,
 ) -> list[BaseTool]:
-    def get_fighter_news(fighter_name: str) -> dict[str, Any]:
-        """Get recent news headlines involving a named MMA fighter."""
-        return news_client.get_recent_news(fighter_name)
+    def search_fighter_news(query: str) -> dict[str, Any]:
+        """Search MMA news using a focused, standalone semantic query."""
+        return news_client.search_news(query)
 
     def get_fighter_stats(fighter_name: str) -> dict[str, Any]:
         """Get current career and fight statistics for a named MMA fighter."""
@@ -129,11 +129,13 @@ def create_fighter_tools(
 
     return [
         StructuredTool.from_function(
-            get_fighter_news,
+            search_fighter_news,
             name="fighter_news",
             description=(
-                "Retrieve recent news headlines about an MMA fighter. Use this "
-                "for recent events, announcements, or current coverage."
+                "Search MMA news for recent events, statements, interviews, "
+                "announcements, or current coverage. Generate a focused, "
+                "standalone search query that preserves every person and topic "
+                "from the user's question."
             ),
         ),
         StructuredTool.from_function(
