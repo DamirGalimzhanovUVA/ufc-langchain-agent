@@ -27,4 +27,5 @@ exec llama-server \
     --port "${LLAMA_SERVER_PORT:-8080}" \
     --ctx-size "${LLAMA_CONTEXT_SIZE:-8192}" \
     --n-gpu-layers "${LLAMA_GPU_LAYERS:-99}" \
-    --jinja
+    --jinja \
+    --reasoning off
