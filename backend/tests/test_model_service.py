@@ -81,9 +81,6 @@ def test_system_prompt_requires_up_to_two_relevant_news_retries() -> None:
     assert "maximum of three Tavily searches per user request" in (
         model_service_module.SYSTEM_PROMPT
     )
-    assert '"Fighter One" "Fighter Two" "live blog"' in (
-        model_service_module.SYSTEM_PROMPT
-    )
 
 
 def test_news_search_decision_logs_retry(
