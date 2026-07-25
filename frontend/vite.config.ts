@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/chat': 'http://localhost:8000',
+      '/chat': process.env.VITE_API_TARGET ?? 'http://localhost:8000',
     },
   },
 })
