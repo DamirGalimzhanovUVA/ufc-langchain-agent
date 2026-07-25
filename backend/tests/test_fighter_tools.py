@@ -189,7 +189,7 @@ def test_get_fight_description_searches_and_scrapes_mmafighting(
     monkeypatch.setattr(fighter_tools_module.requests, "get", get)
     logger = Mock()
     monkeypatch.setattr(fighter_tools_module, "logger", logger)
-    query = "Fighter One vs Fighter Two live blog"
+    query = '"Fighter One" "Fighter Two" "live blog"'
 
     result = get_fight_description(query, "tavily-key")
 
@@ -219,9 +219,9 @@ def test_get_fight_description_searches_and_scrapes_mmafighting(
     article_response.raise_for_status.assert_called_once_with()
     logger.info.assert_has_calls(
         [
-                call(
-                    "Tavily fight description request: url=%s payload=%s",
-                    "https://api.tavily.com/search",
+            call(
+                "Tavily fight description request: url=%s payload=%s",
+                "https://api.tavily.com/search",
                 {
                     "query": query,
                     "topic": "general",
@@ -230,7 +230,8 @@ def test_get_fight_description_searches_and_scrapes_mmafighting(
                 },
             ),
             call(
-                "Tavily fight description response: %s",
+                "Tavily fight description response: attempt=%s response=%s",
+                1,
                 {
                     "results": [
                         {"url": "https://example.com/unrelated"},
@@ -254,20 +255,76 @@ def test_get_fight_description_returns_not_found_without_article_request(
     monkeypatch.setattr(fighter_tools_module.requests, "post", post)
     monkeypatch.setattr(fighter_tools_module.requests, "get", get)
 
-    result = get_fight_description("missing fight live blog", "tavily-key")
+    query = '"Missing Fighter" "Other Fighter" "live blog"'
+    result = get_fight_description(query, "tavily-key")
 
     assert result == {
-        "query": "missing fight live blog",
+        "query": query,
         "found": False,
         "url": None,
         "description": None,
     }
+    assert post.call_count == 3
     get.assert_not_called()
 
 
 def test_get_fight_description_requires_api_key_client() -> None:
     with pytest.raises(RuntimeError, match="TAVILY_API_KEY must be set"):
         get_fight_description("Fighter One vs Fighter Two live blog", None)
+
+
+def test_get_fight_description_retries_until_url_contains_both_fighters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrong_response = Mock()
+    wrong_response.json.return_value = {
+        "results": [
+            {
+                "url": (
+                    "https://www.mmafighting.com/raf-wrestling/500149/"
+                    "arman-tsarukyan-vs-colby-covington"
+                )
+            }
+        ]
+    }
+    correct_response = Mock()
+    correct_response.json.return_value = {
+        "results": [
+            {
+                "url": (
+                    "https://www.mmafighting.com/2024/4/13/24128987/"
+                    "ufc-300-live-blog-charles-oliveira-vs-arman-tsarukyan"
+                )
+            }
+        ]
+    }
+    post = Mock(
+        side_effect=[wrong_response, wrong_response, correct_response]
+    )
+    article_response = Mock()
+    article_response.text = """
+    <main id="content"><article><div id="zephr-anchor">
+      <div class="duet--article--article-body-component">
+        <p class="duet--article--standard-paragraph">Correct fight.</p>
+      </div>
+    </div></article></main>
+    """
+    monkeypatch.setattr(fighter_tools_module.requests, "post", post)
+    monkeypatch.setattr(
+        fighter_tools_module.requests,
+        "get",
+        Mock(return_value=article_response),
+    )
+
+    result = get_fight_description(
+        '"Arman Tsarukyan" "Charles Oliveira" "live blog"',
+        "tavily-key",
+    )
+
+    assert result["found"] is True
+    assert "charles-oliveira-vs-arman-tsarukyan" in result["url"]
+    assert result["description"] == "Correct fight."
+    assert post.call_count == 3
 
 
 def test_tools_delegate_to_injected_clients_and_provider(
@@ -299,8 +356,9 @@ def test_tools_delegate_to_injected_clients_and_provider(
     wikipedia_result = tools_by_name["fighter_wikipedia"].invoke(
         {"fighter_name": "José Aldo"}
     )
+    fight_query = '"José Aldo" "Conor McGregor" "live blog"'
     fight_description_result = tools_by_name["fight_description"].invoke(
-        {"query": "José Aldo vs Conor McGregor live blog"}
+        {"query": fight_query}
     )
 
     assert news_result == {"results": []}
@@ -313,15 +371,16 @@ def test_tools_delegate_to_injected_clients_and_provider(
     }
     assert wikipedia_result == {"found": True}
     assert fight_description_result == {
-        "query": "José Aldo vs Conor McGregor live blog",
+        "query": fight_query,
         "found": False,
         "url": None,
         "description": None,
     }
-    post.assert_called_once_with(
+    assert post.call_count == 3
+    post.assert_called_with(
         "https://api.tavily.com/search",
         json={
-            "query": "José Aldo vs Conor McGregor live blog",
+            "query": fight_query,
             "topic": "general",
             "search_depth": "advanced",
             "include_domains": ["mmafighting.com"],
@@ -371,27 +430,38 @@ def test_tools_delegate_to_injected_clients_and_provider(
             call(
                 "Tool call: name=%s arguments=%s",
                 "fight_description",
-                {"query": "José Aldo vs Conor McGregor live blog"},
+                {"query": fight_query},
             ),
             call(
                 "Tavily fight description request: url=%s payload=%s",
                 "https://api.tavily.com/search",
-                    {
-                        "query": "José Aldo vs Conor McGregor live blog",
-                        "topic": "general",
-                        "search_depth": "advanced",
-                        "include_domains": ["mmafighting.com"],
-                    },
-                ),
-                call(
-                    "Tavily fight description response: %s",
-                    {"results": []},
-                ),
-                call(
-                    "Tool result: name=%s result=%s",
+                {
+                    "query": fight_query,
+                    "topic": "general",
+                    "search_depth": "advanced",
+                    "include_domains": ["mmafighting.com"],
+                },
+            ),
+            call(
+                "Tavily fight description response: attempt=%s response=%s",
+                1,
+                {"results": []},
+            ),
+            call(
+                "Tavily fight description response: attempt=%s response=%s",
+                2,
+                {"results": []},
+            ),
+            call(
+                "Tavily fight description response: attempt=%s response=%s",
+                3,
+                {"results": []},
+            ),
+            call(
+                "Tool result: name=%s result=%s",
                 "fight_description",
                 {
-                    "query": "José Aldo vs Conor McGregor live blog",
+                    "query": fight_query,
                     "found": False,
                     "url": None,
                     "description": None,

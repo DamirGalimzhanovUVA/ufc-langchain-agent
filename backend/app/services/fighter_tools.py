@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -149,6 +150,21 @@ def get_fight_description(
     if not tavily_api_key:
         raise RuntimeError("TAVILY_API_KEY must be set")
 
+    fighter_names = [
+        term
+        for term in re.findall(r'"([^"]+)"', query)
+        if term.lower() != "live blog"
+    ]
+    if len(fighter_names) != 2:
+        raise ValueError(
+            'Fight description query must be formatted as '
+            '"Fighter One" "Fighter Two" "live blog"'
+        )
+    fighter_url_parts = [
+        fighter_name.lower().replace(" ", "-")
+        for fighter_name in fighter_names
+    ]
+
     payload = {
         "query": query,
         "topic": "general",
@@ -160,28 +176,43 @@ def get_fight_description(
         "https://api.tavily.com/search",
         payload,
     )
-    search_response = requests.post(
-        "https://api.tavily.com/search",
-        json=payload,
-        headers={"Authorization": f"Bearer {tavily_api_key}"},
-        timeout=timeout_seconds,
-    )
-    search_response.raise_for_status()
-    response = search_response.json()
-    logger.info("Tavily fight description response: %s", response)
-    article_url = next(
-        (
-            result.get("url")
-            for result in response.get("results", [])
-            if isinstance(result, dict)
-            and isinstance(result.get("url"), str)
-            and (
-                urlparse(result["url"]).hostname == "mmafighting.com"
-                or urlparse(result["url"]).hostname == "www.mmafighting.com"
-            )
-        ),
-        None,
-    )
+    article_url = None
+    for attempt in range(1, 4):
+        search_response = requests.post(
+            "https://api.tavily.com/search",
+            json=payload,
+            headers={"Authorization": f"Bearer {tavily_api_key}"},
+            timeout=timeout_seconds,
+        )
+        search_response.raise_for_status()
+        response = search_response.json()
+        logger.info(
+            "Tavily fight description response: attempt=%s response=%s",
+            attempt,
+            response,
+        )
+        article_url = next(
+            (
+                result.get("url")
+                for result in response.get("results", [])
+                if isinstance(result, dict)
+                and isinstance(result.get("url"), str)
+                and (
+                    urlparse(result["url"]).hostname == "mmafighting.com"
+                    or urlparse(result["url"]).hostname
+                    == "www.mmafighting.com"
+                )
+                and all(
+                    fighter_url_part
+                    in urlparse(result["url"]).path.lower()
+                    for fighter_url_part in fighter_url_parts
+                )
+            ),
+            None,
+        )
+        if article_url is not None:
+            break
+
     if article_url is None:
         return {
             "query": query,
@@ -243,7 +274,7 @@ def create_fighter_tools(
         return result
 
     def find_fight_description(query: str) -> dict[str, Any]:
-        """Find and scrape an MMA Fighting live blog's fight description."""
+        """Find and scrape a quoted MMA Fighting live-blog fight query."""
         arguments = {"query": query}
         logger.info(
             "Tool call: name=%s arguments=%s",
@@ -290,8 +321,8 @@ def create_fighter_tools(
             name="fight_description",
             description=(
                 "Find an MMA Fighting live-blog page for a specific fight and "
-                "retrieve the matchup description from the main article. Pass "
-                "a focused query containing both fighter names and 'live blog'."
+                "retrieve the matchup description from the main article. Format "
+                'the query exactly as: "Fighter One" "Fighter Two" "live blog".'
             ),
         ),
     ]
