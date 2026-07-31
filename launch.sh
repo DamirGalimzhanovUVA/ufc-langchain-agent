@@ -16,9 +16,6 @@ export FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 export VITE_API_TARGET="${VITE_API_TARGET:-http://127.0.0.1:$BACKEND_PORT}"
 export NODE_ENV="${NODE_ENV:-development}"
 
-"$backend_dir/start-llama-server.sh" &
-model_pid=$!
-
 (
     cd "$backend_dir/app"
     uvicorn main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
@@ -32,23 +29,19 @@ backend_pid=$!
 frontend_pid=$!
 
 stop_services() {
-    kill "$model_pid" "$backend_pid" "$frontend_pid" 2>/dev/null || true
-    wait "$model_pid" "$backend_pid" "$frontend_pid" 2>/dev/null || true
+    kill "$backend_pid" "$frontend_pid" 2>/dev/null || true
+    wait "$backend_pid" "$frontend_pid" 2>/dev/null || true
 }
 
 trap stop_services EXIT INT TERM
 
-while kill -0 "$model_pid" 2>/dev/null \
-    && kill -0 "$backend_pid" 2>/dev/null \
+while kill -0 "$backend_pid" 2>/dev/null \
     && kill -0 "$frontend_pid" 2>/dev/null; do
     sleep 0.1
 done
 
 set +e
-if ! kill -0 "$model_pid" 2>/dev/null; then
-    wait "$model_pid"
-    exit_code=$?
-elif ! kill -0 "$backend_pid" 2>/dev/null; then
+if ! kill -0 "$backend_pid" 2>/dev/null; then
     wait "$backend_pid"
     exit_code=$?
 else

@@ -1,7 +1,6 @@
 from collections.abc import Iterator
 from unittest.mock import Mock, call
 
-import httpx
 import pytest
 from langchain_core.messages import (
     AIMessage,
@@ -28,10 +27,7 @@ def test_initialize_creates_model_and_agent_once(
     monkeypatch.setattr(
         model_service_module, "ToolCallLimitMiddleware", tool_call_limit
     )
-    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:9090/v1")
-    monkeypatch.setenv("LLM_MODEL", "qwen-local")
-    monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_TEMPERATURE", "0.2")
+    monkeypatch.setenv("LLM_MODEL", "gpt-5-mini")
     monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
     service = ModelService()
 
@@ -41,10 +37,7 @@ def test_initialize_creates_model_and_agent_once(
     assert first_result is chat_model
     assert second_result is chat_model
     chat_openai.assert_called_once_with(
-        model="qwen-local",
-        base_url="http://localhost:9090/v1",
-        api_key="test-key",
-        temperature=0.2,
+        model="gpt-5-mini",
         max_tokens=1024,
     )
     assert service.get_model() is chat_model
@@ -156,17 +149,14 @@ def test_news_search_decision_logs_stop(
     )
 
 
-def test_initialize_uses_local_server_defaults(
+def test_initialize_uses_gpt_5_nano_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     chat_openai = Mock(return_value=Mock())
     monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
     monkeypatch.setattr(model_service_module, "create_agent", Mock())
     for variable in (
-        "LLM_BASE_URL",
         "LLM_MODEL",
-        "LLM_API_KEY",
-        "LLM_TEMPERATURE",
         "LLM_MAX_TOKENS",
     ):
         monkeypatch.delenv(variable, raising=False)
@@ -174,10 +164,7 @@ def test_initialize_uses_local_server_defaults(
     ModelService().initialize()
 
     chat_openai.assert_called_once_with(
-        model="local-model",
-        base_url="http://127.0.0.1:8080/v1",
-        api_key="local-key",
-        temperature=0.7,
+        model="gpt-5-nano",
         max_tokens=2048,
     )
 
@@ -312,31 +299,6 @@ def test_create_chat_completion_ignores_non_text_agent_events() -> None:
     )
 
     assert tokens == ["José Aldo has 32 wins."]
-
-
-def test_create_chat_completion_reports_unavailable_server() -> None:
-    request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
-    agent = Mock()
-    agent.stream.side_effect = httpx.ConnectError(
-        "Connection refused", request=request
-    )
-    service = ModelService()
-    service.chat_model = Mock()
-    service.agent = agent
-    service.base_url = "http://127.0.0.1:8080/v1"
-
-    with pytest.raises(
-        RuntimeError,
-        match=(
-            "local model server is unavailable at "
-            "http://127.0.0.1:8080/v1"
-        ),
-    ):
-        list(
-            service.create_chat_completion(
-                [{"role": "user", "content": "Question"}]
-            )
-        )
 
 
 def test_create_chat_completion_requires_final_assistant_message() -> None:

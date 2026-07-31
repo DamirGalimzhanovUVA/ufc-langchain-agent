@@ -31,12 +31,8 @@ def test_launch_script_sets_service_environments(
     bin_dir.mkdir()
     backend_output = tmp_path / "backend-output"
     frontend_output = tmp_path / "frontend-output"
-    model_output = tmp_path / "model-output"
-    model_path = tmp_path / "model.gguf"
-    model_path.touch()
     create_command(bin_dir, "uvicorn", backend_output, 1)
     create_command(bin_dir, "npm", frontend_output, 1)
-    create_command(bin_dir, "llama-server", model_output, 0.1)
     environment = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -45,11 +41,6 @@ def test_launch_script_sets_service_environments(
         "BACKEND_ENV_FILE": "/run/config/backend.env",
         "FRONTEND_HOST": "127.0.0.3",
         "FRONTEND_PORT": "6000",
-        "MODEL_PATH": str(model_path),
-        "LLAMA_SERVER_HOST": "127.0.0.4",
-        "LLAMA_SERVER_PORT": "7000",
-        "LLAMA_CONTEXT_SIZE": "4096",
-        "LLAMA_GPU_LAYERS": "0",
         "PYTHONPATH": "",
     }
 
@@ -74,11 +65,4 @@ def test_launch_script_sets_service_environments(
         f"/run/config/backend.env|{project_dir / 'backend/app'}|"
         "http://127.0.0.1:9000|development|"
         "run dev -- --host 127.0.0.3 --port 6000"
-    )
-    assert model_output.read_text().strip() == (
-        f"{project_dir}|127.0.0.2|9000|127.0.0.3|6000|"
-        f"/run/config/backend.env|{project_dir / 'backend/app'}|"
-        "http://127.0.0.1:9000|development|"
-        f"--model {model_path} --host 127.0.0.4 --port 7000 "
-        "--ctx-size 4096 --n-gpu-layers 0 --jinja --reasoning off"
     )
