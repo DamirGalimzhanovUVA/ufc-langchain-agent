@@ -46,23 +46,31 @@ From the repository root:
 docker build -t octagon-iq .
 ```
 
-### 2. Run the application
+### 2. Configure the application
+
+Create `backend/.env` from the included example and add your API keys:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+The `.env` file is ignored by Git and excluded from the Docker image.
+
+### 3. Run the application
 
 ```bash
 docker run --rm \
   --name octagon-iq \
   -p 5173:5173 \
   -p 8000:8000 \
-  -e OPENAI_API_KEY=your-openai-api-key \
-  -e TAVILY_API_KEY=your-tavily-api-key \
-  -e FIGHTER_STATS_API_KEY=your-citoapi-key \
+  --env-file backend/.env \
   octagon-iq
 ```
 
 Open [http://localhost:5173](http://localhost:5173) to use the chat interface.
 The FastAPI service is available at `http://localhost:8000`.
 
-### 3. Stop or inspect the container
+### 4. Stop or inspect the container
 
 The example runs in the foreground; press `Ctrl+C` to stop it. If it is running
 detached, use:
@@ -74,8 +82,8 @@ docker stop octagon-iq
 
 ## Configuration
 
-Docker environment variables can be passed individually with `-e` or collected
-in an env file and supplied with `docker run --env-file`.
+Docker reads the application configuration from `backend/.env` through the
+`docker run --env-file` option.
 
 | Variable                | Default                 | Purpose                                              |
 | ----------------------- | ----------------------- | ---------------------------------------------------- |
@@ -161,15 +169,15 @@ The response body is streamed as plain text.
 
 ## Development and tests
 
-`launch.sh` starts FastAPI and Vite together. For local use, install the Python
-and frontend dependencies, set `OPENAI_API_KEY`, and run:
+`launch.sh` starts FastAPI and Vite together. For local use, configure
+`backend/.env`, install the Python and frontend dependencies, and run:
 
 ```bash
 python3 -m venv backend/.venv
 source backend/.venv/bin/activate
 pip install -r backend/requirements.txt
 npm ci --prefix frontend
-OPENAI_API_KEY=your-openai-api-key ./launch.sh
+./launch.sh
 ```
 
 Run the automated checks with:
