@@ -1,5 +1,6 @@
 import json
 from typing import Any, Protocol
+from unicodedata import normalize
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -21,7 +22,12 @@ class HttpFighterStatsProvider:
         self.timeout_seconds = timeout_seconds
 
     def get_fighter_stats(self, fighter_name: str) -> dict[str, Any]:
-        slug = "-".join(fighter_name.replace("*", "").lower().split())
+        ascii_name = (
+            normalize("NFKD", fighter_name)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+        slug = "-".join(ascii_name.replace("*", "").lower().split())
         url = self.api_url.format(slug=quote(slug, safe="-"))
 
         headers = {"Accept": "application/json"}

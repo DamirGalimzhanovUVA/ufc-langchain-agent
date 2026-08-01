@@ -40,6 +40,8 @@ def test_http_stats_provider_requests_cito_api(
         ("*Dricucs* Du Plessis", "dricucs-du-plessis"),
         ("Benoit Saint Denis", "benoit-saint-denis"),
         ("Loneer Kavanagh", "loneer-kavanagh"),
+        ("José Aldo", "jose-aldo"),
+        ("João Silva", "joao-silva"),
     ],
 )
 def test_http_stats_provider_builds_fighter_slug(
