@@ -177,7 +177,7 @@ class ModelService:
 
         stream = agent.stream(
             {"messages": agent_messages},
-            config={"recursion_limit": 10},
+            config={"recursion_limit": 15},
             stream_mode="messages",
         )
         for token, metadata in stream:
