@@ -18,8 +18,12 @@ test('streamChat sends the conversation and emits streamed content', async () =>
     return new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode('The current '))
-          controller.enqueue(encoder.encode('champion is...'))
+          controller.enqueue(
+            encoder.encode('{"content":"The current "}\n'),
+          )
+          controller.enqueue(
+            encoder.encode('{"content":"champion is..."}\n'),
+          )
           controller.close()
         },
       }),
@@ -39,12 +43,43 @@ test('streamChat sends the conversation and emits streamed content', async () =>
   assert.equal(content, 'The current champion is...')
 })
 
-test('streamChat reports an unsuccessful response', async () => {
+test('streamChat reports the backend error from an unsuccessful response', async () => {
   const fetchRequest = async (): Promise<Response> =>
-    new Response(null, { status: 503 })
+    Response.json(
+      {
+        error: {
+          message: 'Please send your message again.',
+          retryable: true,
+        },
+      },
+      { status: 503 },
+    )
 
   await assert.rejects(
     streamChat([], () => undefined, fetchRequest),
-    /chat service returned 503/,
+    /Please send your message again/,
+  )
+})
+
+test('streamChat handles an error after partial streamed content', async () => {
+  const encoder = new TextEncoder()
+  const fetchRequest = async (): Promise<Response> =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"content":"Partial"}\n{"err'))
+          controller.enqueue(
+            encoder.encode(
+              'or":{"message":"Please send the message again.","retryable":true}}\n',
+            ),
+          )
+          controller.close()
+        },
+      }),
+    )
+
+  await assert.rejects(
+    streamChat([], () => undefined, fetchRequest),
+    /Please send the message again/,
   )
 })

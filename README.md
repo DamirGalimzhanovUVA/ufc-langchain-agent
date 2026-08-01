@@ -165,7 +165,10 @@ Example request body:
 }
 ```
 
-The response body is streamed as plain text.
+The response body is streamed as newline-delimited JSON. Successful records
+contain `{"content": "..."}`. If generation fails, the backend logs the
+exception and sends an `error` record with a user-safe message and a
+`retryable` flag so the interface can ask the user to resend the message.
 
 ## Development and tests
 

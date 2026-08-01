@@ -76,9 +76,12 @@ function App() {
       ])
     } catch (requestError) {
       const message =
-        requestError instanceof Error ? requestError.message : 'Something went wrong.'
-      setMessages(requestMessages)
-      setError(`${message} Please try again.`)
+        requestError instanceof Error
+          ? requestError.message
+          : "We couldn't complete your request. Please send your message again."
+      setMessages(messages)
+      setInput(content)
+      setError(message)
     } finally {
       setIsLoading(false)
     }
