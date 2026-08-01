@@ -9,6 +9,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langgraph.errors import GraphRecursionError
 
 import services.model_service as model_service_module
 from services.model_service import ModelService, convert_messages
@@ -204,23 +205,47 @@ def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
 
     def stream(
         *args: object, **kwargs: object
-    ) -> Iterator[tuple[AIMessageChunk, dict[str, str]]]:
+    ) -> Iterator[tuple[str, object]]:
         nonlocal stream_finished
         yield (
-            AIMessageChunk(
-                content="",
-                additional_kwargs={"reasoning_content": "Thinking "},
-            ),
-            {"langgraph_node": "model"},
+            "debug",
+            {"step": 1, "type": "task", "payload": {"name": "model"}},
         )
         yield (
-            AIMessageChunk(
-                content=[{"type": "reasoning", "reasoning": "carefully. "}]
+            "messages",
+            (
+                AIMessageChunk(
+                    content="",
+                    additional_kwargs={"reasoning_content": "Thinking "},
+                ),
+                {"langgraph_node": "model"},
             ),
-            {"langgraph_node": "model"},
         )
-        yield AIMessageChunk(content="Final "), {"langgraph_node": "model"}
-        yield AIMessageChunk(content="answer"), {"langgraph_node": "model"}
+        yield (
+            "messages",
+            (
+                AIMessageChunk(
+                    content=[
+                        {"type": "reasoning", "reasoning": "carefully. "}
+                    ]
+                ),
+                {"langgraph_node": "model"},
+            ),
+        )
+        yield (
+            "messages",
+            (
+                AIMessageChunk(content="Final "),
+                {"langgraph_node": "model"},
+            ),
+        )
+        yield (
+            "messages",
+            (
+                AIMessageChunk(content="answer"),
+                {"langgraph_node": "model"},
+            ),
+        )
         stream_finished = True
 
     agent = Mock()
@@ -236,25 +261,35 @@ def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
 
     assert next(tokens) == "Thinking "
     assert stream_finished is False
-    logger.info.assert_called_once_with(
-        "Generated %s chunk: %r", "reasoning", "Thinking "
-    )
+    assert logger.info.call_args_list == [
+        call("Graph hop: step=%s node=%s", 1, "model"),
+        call("Generated %s chunk: %r", "reasoning", "Thinking "),
+    ]
 
     assert list(tokens) == ["carefully. ", "Final ", "answer"]
     assert stream_finished is True
     assert logger.info.call_args_list == [
+        call("Graph hop: step=%s node=%s", 1, "model"),
         call("Generated %s chunk: %r", "reasoning", "Thinking "),
         call("Generated %s chunk: %r", "reasoning", "carefully. "),
         call("Generated %s chunk: %r", "text", "Final "),
         call("Generated %s chunk: %r", "text", "answer"),
+        call(
+            "Graph execution summary: supersteps=%s graph_tasks=%s "
+            "model_calls=%s tool_calls=%s",
+            1,
+            1,
+            1,
+            0,
+        ),
     ]
     invocation = agent.stream.call_args
     assert invocation.args[0] == {
         "messages": [HumanMessage(content="Question")]
     }
     assert invocation.kwargs == {
-        "config": {"recursion_limit": 10},
-        "stream_mode": "messages",
+        "config": {"recursion_limit": 15},
+        "stream_mode": ["messages", "debug"],
     }
 
 
@@ -263,28 +298,44 @@ def test_create_chat_completion_ignores_non_text_agent_events() -> None:
     agent.stream.return_value = iter(
         [
             (
-                AIMessageChunk(
-                    content="",
-                    tool_call_chunks=[
-                        {
-                            "name": "fighter_stats",
-                            "args": '{"fighter_name": "José Aldo"}',
-                            "id": "call-1",
-                            "index": 0,
-                        }
-                    ],
+                "messages",
+                (
+                    AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            {
+                                "name": "fighter_stats",
+                                "args": '{"fighter_name": "José Aldo"}',
+                                "id": "call-1",
+                                "index": 0,
+                            }
+                        ],
+                    ),
+                    {"langgraph_node": "model"},
                 ),
-                {"langgraph_node": "model"},
             ),
             (
-                ToolMessage(content='{"wins": 32}', tool_call_id="call-1"),
-                {"langgraph_node": "tools"},
+                "messages",
+                (
+                    ToolMessage(
+                        content='{"wins": 32}', tool_call_id="call-1"
+                    ),
+                    {"langgraph_node": "tools"},
+                ),
             ),
             (
-                AIMessageChunk(
-                    content=[{"type": "text", "text": "José Aldo has 32 wins."}]
+                "messages",
+                (
+                    AIMessageChunk(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": "José Aldo has 32 wins.",
+                            }
+                        ]
+                    ),
+                    {"langgraph_node": "model"},
                 ),
-                {"langgraph_node": "model"},
             ),
         ]
     )
@@ -304,7 +355,15 @@ def test_create_chat_completion_ignores_non_text_agent_events() -> None:
 def test_create_chat_completion_requires_final_assistant_message() -> None:
     agent = Mock()
     agent.stream.return_value = iter(
-        [(HumanMessage(content="Question"), {"langgraph_node": "model"})]
+        [
+            (
+                "messages",
+                (
+                    HumanMessage(content="Question"),
+                    {"langgraph_node": "model"},
+                ),
+            )
+        ]
     )
     service = ModelService()
     service.chat_model = Mock()
@@ -318,3 +377,58 @@ def test_create_chat_completion_requires_final_assistant_message() -> None:
                 [{"role": "user", "content": "Question"}]
             )
         )
+
+
+def test_create_chat_completion_logs_graph_summary_on_recursion_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def stream(
+        *args: object, **kwargs: object
+    ) -> Iterator[tuple[str, object]]:
+        yield (
+            "debug",
+            {"step": 1, "type": "task", "payload": {"name": "model"}},
+        )
+        yield (
+            "debug",
+            {
+                "step": 2,
+                "type": "task",
+                "payload": {
+                    "name": "ToolCallLimitMiddleware[fighter_news].after_model"
+                },
+            },
+        )
+        yield (
+            "debug",
+            {"step": 3, "type": "task", "payload": {"name": "tools"}},
+        )
+        yield (
+            "debug",
+            {"step": 4, "type": "task", "payload": {"name": "model"}},
+        )
+        raise GraphRecursionError("Recursion limit reached")
+
+    agent = Mock()
+    agent.stream.side_effect = stream
+    logger = Mock()
+    monkeypatch.setattr(model_service_module, "logger", logger)
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+
+    with pytest.raises(GraphRecursionError, match="Recursion limit reached"):
+        list(
+            service.create_chat_completion(
+                [{"role": "user", "content": "Question"}]
+            )
+        )
+
+    assert logger.info.call_args_list[-1] == call(
+        "Graph execution summary: supersteps=%s graph_tasks=%s "
+        "model_calls=%s tool_calls=%s",
+        4,
+        4,
+        2,
+        1,
+    )

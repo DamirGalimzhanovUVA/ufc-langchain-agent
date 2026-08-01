@@ -174,25 +174,62 @@ class ModelService:
         agent = self.get_agent()
         agent_messages = convert_messages(messages)
         returned_content = False
+        graph_steps: set[int] = set()
+        graph_tasks = 0
+        model_calls = 0
+        tool_calls = 0
 
         stream = agent.stream(
             {"messages": agent_messages},
             config={"recursion_limit": 15},
-            stream_mode="messages",
+            stream_mode=["messages", "debug"],
         )
-        for token, metadata in stream:
-            if not isinstance(token, AIMessageChunk):
-                continue
+        try:
+            for stream_mode, event in stream:
+                if stream_mode == "debug":
+                    if event.get("type") != "task":
+                        continue
 
-            for chunk_type, content in get_generated_chunks(
-                token.content_blocks
-            ):
-                if not content:
+                    step = event.get("step")
+                    node = event.get("payload", {}).get("name")
+                    if isinstance(step, int):
+                        graph_steps.add(step)
+                    graph_tasks += 1
+                    if node == "model":
+                        model_calls += 1
+                    elif node == "tools":
+                        tool_calls += 1
+                    logger.info(
+                        "Graph hop: step=%s node=%s",
+                        step,
+                        node,
+                    )
                     continue
 
-                logger.info("Generated %s chunk: %r", chunk_type, content)
-                returned_content = True
-                yield content
+                token, metadata = event
+                if not isinstance(token, AIMessageChunk):
+                    continue
+
+                for chunk_type, content in get_generated_chunks(
+                    token.content_blocks
+                ):
+                    if not content:
+                        continue
+
+                    logger.info(
+                        "Generated %s chunk: %r", chunk_type, content
+                    )
+                    returned_content = True
+                    yield content
+        finally:
+            logger.info(
+                "Graph execution summary: supersteps=%s graph_tasks=%s "
+                "model_calls=%s tool_calls=%s",
+                len(graph_steps),
+                graph_tasks,
+                model_calls,
+                tool_calls,
+            )
 
         if not returned_content:
             raise RuntimeError("The agent did not return an assistant response")
