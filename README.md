@@ -113,8 +113,9 @@ For a non-Docker launch, `launch.sh` also reads backend configuration from
 | `fighter_wikipedia` | Fighter name                       | Wikipedia API                | A fighter biography, background summary, and source URL                |
 | `fight_description` | Both fighter names and `live blog` | Tavily and MMA Fighting      | The matchup description from a relevant MMA Fighting live-blog article |
 
-The agent may make at most three `fighter_news` calls for one request. Tool
-errors are reported to the user instead of being replaced with invented data.
+The agent may make at most three `fighter_news` calls and one
+`fight_description` call for one request. Tool errors are reported to the user
+instead of being replaced with invented data.
 
 ## Technologies
 

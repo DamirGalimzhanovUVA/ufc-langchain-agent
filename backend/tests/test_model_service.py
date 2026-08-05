@@ -22,7 +22,11 @@ def test_initialize_creates_model_and_agent_once(
     chat_openai = Mock(return_value=chat_model)
     agent = Mock()
     create_agent = Mock(return_value=agent)
-    tool_call_limit = Mock(return_value=Mock())
+    news_call_limit = Mock()
+    fight_description_call_limit = Mock()
+    tool_call_limit = Mock(
+        side_effect=[news_call_limit, fight_description_call_limit]
+    )
     monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
     monkeypatch.setattr(model_service_module, "create_agent", create_agent)
     monkeypatch.setattr(
@@ -49,18 +53,26 @@ def test_initialize_creates_model_and_agent_once(
         "fighter_wikipedia",
         "fight_description",
     ]
-    tool_call_limit.assert_called_once_with(
-        tool_name="fighter_news",
-        run_limit=3,
-        exit_behavior="continue",
-    )
+    assert tool_call_limit.call_args_list == [
+        call(
+            tool_name="fighter_news",
+            run_limit=3,
+            exit_behavior="continue",
+        ),
+        call(
+            tool_name="fight_description",
+            run_limit=1,
+            exit_behavior="continue",
+        ),
+    ]
     create_agent.assert_called_once_with(
         model=chat_model,
         tools=service.tools,
         system_prompt=model_service_module.SYSTEM_PROMPT,
         middleware=[
             model_service_module.log_news_search_decision,
-            tool_call_limit.return_value,
+            news_call_limit,
+            fight_description_call_limit,
         ],
     )
 
@@ -73,6 +85,12 @@ def test_system_prompt_requires_up_to_two_relevant_news_retries() -> None:
         model_service_module.SYSTEM_PROMPT
     )
     assert "maximum of three Tavily searches per user request" in (
+        model_service_module.SYSTEM_PROMPT
+    )
+
+
+def test_system_prompt_limits_fight_description_to_one_call() -> None:
+    assert "fight description tool no more than once" in (
         model_service_module.SYSTEM_PROMPT
     )
 
@@ -288,7 +306,7 @@ def test_create_chat_completion_streams_and_logs_chunks_as_they_arrive(
         "messages": [HumanMessage(content="Question")]
     }
     assert invocation.kwargs == {
-        "config": {"recursion_limit": 15},
+        "config": {"recursion_limit": 30},
         "stream_mode": ["messages", "debug"],
     }
 

@@ -32,6 +32,7 @@ Use the Wikipedia tool for fighter background and career information.
 Use the fighter stats tool for structured fighter statistics.
 Use the fight description tool when asked for the background, stakes, or
 description of a specific matchup covered by an MMA Fighting live blog.
+Call the fight description tool no more than once per user request.
 Use the Tavily news tool for recent developments. When using it, generate a
 focused, standalone search query that preserves every person and topic from the
 user's question. After each search, determine whether the result content answers
@@ -150,7 +151,12 @@ class ModelService:
                         tool_name="fighter_news",
                         run_limit=3,
                         exit_behavior="continue",
-                    )
+                    ),
+                    ToolCallLimitMiddleware(
+                        tool_name="fight_description",
+                        run_limit=1,
+                        exit_behavior="continue",
+                    ),
                 ],
             )
 
