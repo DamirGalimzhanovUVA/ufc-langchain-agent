@@ -181,7 +181,7 @@ class ModelService:
 
         stream = agent.stream(
             {"messages": agent_messages},
-            config={"recursion_limit": 15},
+            config={"recursion_limit": 30},
             stream_mode=["messages", "debug"],
         )
         try:
