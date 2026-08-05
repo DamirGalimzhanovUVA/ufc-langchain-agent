@@ -26,7 +26,6 @@ from services.fighter_tools import (
 
 ChatMessage = dict[str, str]
 logger = logging.getLogger("uvicorn.error")
-LLM_MAX_TOKENS = 2048
 
 
 class ModelResponseError(RuntimeError):
@@ -174,7 +173,6 @@ class ModelService:
         if self.chat_model is None:
             self.chat_model = ChatOpenAI(
                 model=os.getenv("LLM_MODEL", "gpt-5-nano"),
-                max_tokens=LLM_MAX_TOKENS,
             )
             stats_provider = HttpFighterStatsProvider(
                 api_key=os.environ.get("FIGHTER_STATS_API_KEY"),

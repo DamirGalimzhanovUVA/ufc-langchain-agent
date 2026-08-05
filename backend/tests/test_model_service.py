@@ -45,10 +45,7 @@ def test_initialize_creates_model_and_agent_once(
 
     assert first_result is chat_model
     assert second_result is chat_model
-    chat_openai.assert_called_once_with(
-        model="gpt-5-mini",
-        max_tokens=model_service_module.LLM_MAX_TOKENS,
-    )
+    chat_openai.assert_called_once_with(model="gpt-5-mini")
     assert service.get_model() is chat_model
     assert service.get_agent() is agent
     assert [tool.name for tool in service.tools] == [
@@ -182,10 +179,7 @@ def test_initialize_uses_gpt_5_nano_by_default(
 
     ModelService().initialize()
 
-    chat_openai.assert_called_once_with(
-        model="gpt-5-nano",
-        max_tokens=model_service_module.LLM_MAX_TOKENS,
-    )
+    chat_openai.assert_called_once_with(model="gpt-5-nano")
 
 
 def test_get_model_raises_when_model_is_not_initialized() -> None:
