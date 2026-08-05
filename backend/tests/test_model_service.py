@@ -38,7 +38,6 @@ def test_initialize_creates_model_and_agent_once(
         model_service_module, "ToolCallLimitMiddleware", tool_call_limit
     )
     monkeypatch.setenv("LLM_MODEL", "gpt-5-mini")
-    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
     service = ModelService()
 
     first_result = service.initialize()
@@ -48,7 +47,7 @@ def test_initialize_creates_model_and_agent_once(
     assert second_result is chat_model
     chat_openai.assert_called_once_with(
         model="gpt-5-mini",
-        max_tokens=1024,
+        max_tokens=model_service_module.LLM_MAX_TOKENS,
     )
     assert service.get_model() is chat_model
     assert service.get_agent() is agent
@@ -179,17 +178,13 @@ def test_initialize_uses_gpt_5_nano_by_default(
     chat_openai = Mock(return_value=Mock())
     monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
     monkeypatch.setattr(model_service_module, "create_agent", Mock())
-    for variable in (
-        "LLM_MODEL",
-        "LLM_MAX_TOKENS",
-    ):
-        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
 
     ModelService().initialize()
 
     chat_openai.assert_called_once_with(
         model="gpt-5-nano",
-        max_tokens=2048,
+        max_tokens=model_service_module.LLM_MAX_TOKENS,
     )
 
 

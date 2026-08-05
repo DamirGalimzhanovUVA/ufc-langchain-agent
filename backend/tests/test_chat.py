@@ -116,7 +116,7 @@ def test_chat_streams_non_retryable_error_for_model_refusal(
     )
 
 
-def test_chat_streams_model_response_json_when_enabled(
+def test_chat_streams_model_response_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_response = {
@@ -134,8 +134,6 @@ def test_chat_streams_model_response_json_when_enabled(
     service = Mock()
     service.create_chat_completion.return_value = failed_stream()
     monkeypatch.setattr(main, "model_service", service)
-    monkeypatch.setenv("SHOW_MODEL_RESPONSE_JSON", "true")
-
     with TestClient(main.app) as client:
         response = client.post(
             "/chat",

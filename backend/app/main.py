@@ -20,6 +20,7 @@ from services.model_service import (
 
 
 logger = logging.getLogger("uvicorn.error")
+SHOW_MODEL_RESPONSE_JSON = True
 CHAT_ERROR_MESSAGE = (
     "We couldn't complete your request. Please send your message again."
 )
@@ -67,7 +68,7 @@ def get_error_content(
         "retryable": retryable,
     }
     if (
-        os.getenv("SHOW_MODEL_RESPONSE_JSON") == "true"
+        SHOW_MODEL_RESPONSE_JSON
         and isinstance(error, ModelResponseError)
         and error.model_response is not None
     ):
@@ -75,17 +76,36 @@ def get_error_content(
     return {"error": error_content}
 
 
+def log_chat_exception(message: str, error: Exception) -> None:
+    if (
+        SHOW_MODEL_RESPONSE_JSON
+        and isinstance(error, ModelResponseError)
+        and error.model_response is not None
+    ):
+        logger.exception(
+            "%s\nModel response JSON:\n%s",
+            message,
+            json.dumps(error.model_response, indent=2),
+        )
+        return
+
+    logger.exception(message)
+
+
 def stream_chat_events(tokens: Iterator[str]) -> Iterator[str]:
     try:
         for token in tokens:
             yield json.dumps({"content": token}) + "\n"
     except ModelRefusalError as error:
-        logger.exception("Chat completion was refused while streaming")
+        log_chat_exception(
+            "Chat completion was refused while streaming",
+            error,
+        )
         yield json.dumps(
             get_error_content(CHAT_REFUSAL_MESSAGE, False, error)
         ) + "\n"
     except Exception as error:
-        logger.exception("Chat completion failed while streaming")
+        log_chat_exception("Chat completion failed while streaming", error)
         yield json.dumps(
             get_error_content(CHAT_ERROR_MESSAGE, True, error)
         ) + "\n"
@@ -100,13 +120,16 @@ def create_chat_completion(
     try:
         tokens = service.create_chat_completion(messages)
     except ModelRefusalError as error:
-        logger.exception("Chat completion was refused before streaming")
+        log_chat_exception(
+            "Chat completion was refused before streaming",
+            error,
+        )
         return JSONResponse(
             status_code=400,
             content=get_error_content(CHAT_REFUSAL_MESSAGE, False, error),
         )
     except Exception as error:
-        logger.exception("Chat completion failed before streaming")
+        log_chat_exception("Chat completion failed before streaming", error)
         return JSONResponse(
             status_code=500,
             content=get_error_content(CHAT_ERROR_MESSAGE, True, error),
