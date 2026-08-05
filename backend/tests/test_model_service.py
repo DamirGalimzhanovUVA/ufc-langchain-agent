@@ -388,7 +388,8 @@ def test_create_chat_completion_requires_final_assistant_message() -> None:
     service.agent = agent
 
     with pytest.raises(
-        RuntimeError, match="agent did not return an assistant response"
+        EmptyModelResponseError,
+        match="model stream contained no assistant content",
     ):
         list(
             service.create_chat_completion(
@@ -397,8 +398,20 @@ def test_create_chat_completion_requires_final_assistant_message() -> None:
         )
 
 
-def test_create_chat_completion_captures_empty_model_response_json() -> None:
-    chunk = AIMessageChunk(
+def test_create_chat_completion_captures_all_empty_model_response_chunks(
+) -> None:
+    tool_chunk = AIMessageChunk(
+        content="",
+        tool_call_chunks=[
+            {
+                "name": "fighter_stats",
+                "args": '{"fighter_name":"José Aldo"}',
+                "id": "call-1",
+                "index": 0,
+            }
+        ],
+    )
+    terminal_chunk = AIMessageChunk(
         content="",
         response_metadata={"finish_reason": "length"},
         usage_metadata={
@@ -412,15 +425,22 @@ def test_create_chat_completion_captures_empty_model_response_json() -> None:
         [
             (
                 "messages",
-                (chunk, {"langgraph_node": "model"}),
-            )
+                (tool_chunk, {"langgraph_node": "model"}),
+            ),
+            (
+                "messages",
+                (terminal_chunk, {"langgraph_node": "model"}),
+            ),
         ]
     )
     service = ModelService()
     service.chat_model = Mock()
     service.agent = agent
 
-    with pytest.raises(EmptyModelResponseError) as raised_error:
+    with pytest.raises(
+        EmptyModelResponseError,
+        match="returned tool calls but no final assistant text",
+    ) as raised_error:
         list(
             service.create_chat_completion(
                 [{"role": "user", "content": "Question"}]
@@ -428,10 +448,13 @@ def test_create_chat_completion_captures_empty_model_response_json() -> None:
         )
 
     assert raised_error.value.model_response is not None
-    assert raised_error.value.model_response["response_metadata"] == {
+    chunks = raised_error.value.model_response["chunks"]
+    assert len(chunks) == 2
+    assert chunks[0]["tool_call_chunks"][0]["name"] == "fighter_stats"
+    assert chunks[1]["response_metadata"] == {
         "finish_reason": "length"
     }
-    assert raised_error.value.model_response["usage_metadata"] == {
+    assert chunks[1]["usage_metadata"] == {
         "input_tokens": 100,
         "output_tokens": 2048,
         "total_tokens": 2148,

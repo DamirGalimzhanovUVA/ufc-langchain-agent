@@ -229,7 +229,9 @@ class ModelService:
         graph_tasks = 0
         model_calls = 0
         tool_calls = 0
-        last_model_response: dict[str, Any] | None = None
+        model_response_chunks: list[dict[str, Any]] = []
+        returned_tool_call = False
+        returned_unrecognized_content = False
 
         stream = agent.stream(
             {"messages": agent_messages},
@@ -262,7 +264,7 @@ class ModelService:
                 if not isinstance(token, AIMessageChunk):
                     continue
 
-                last_model_response = token.model_dump(mode="json")
+                model_response_chunks.append(token.model_dump(mode="json"))
                 refusal = get_refusal(
                     token.content_blocks,
                     token.additional_kwargs,
@@ -271,12 +273,22 @@ class ModelService:
                     logger.info("Generated refusal: %r", refusal)
                     raise ModelRefusalError(
                         "The model refused to answer the request",
-                        last_model_response,
+                        {"chunks": model_response_chunks},
                     )
 
-                for chunk_type, content in get_generated_chunks(
+                has_tool_call = bool(token.tool_calls or token.tool_call_chunks)
+                if has_tool_call:
+                    returned_tool_call = True
+
+                generated_chunks = get_generated_chunks(token.content_blocks)
+                if (
                     token.content_blocks
+                    and not generated_chunks
+                    and not has_tool_call
                 ):
+                    returned_unrecognized_content = True
+
+                for chunk_type, content in generated_chunks:
                     if not content:
                         continue
 
@@ -296,9 +308,21 @@ class ModelService:
             )
 
         if not returned_content:
+            if returned_unrecognized_content:
+                message = (
+                    "The model returned an unsupported content block and no "
+                    "assistant text"
+                )
+            elif returned_tool_call:
+                message = (
+                    "The agent returned tool calls but no final assistant text"
+                )
+            else:
+                message = "The model stream contained no assistant content"
+
             raise EmptyModelResponseError(
-                "The agent did not return an assistant response",
-                last_model_response,
+                message,
+                {"chunks": model_response_chunks},
             )
 
 
