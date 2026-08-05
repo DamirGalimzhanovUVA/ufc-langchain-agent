@@ -27,6 +27,11 @@ from services.fighter_tools import (
 ChatMessage = dict[str, str]
 logger = logging.getLogger("uvicorn.error")
 
+
+class ModelRefusalError(RuntimeError):
+    pass
+
+
 SYSTEM_PROMPT = """You are a UFC research assistant.
 Use the Wikipedia tool for fighter background and career information.
 Use the fighter stats tool for structured fighter statistics.
@@ -117,6 +122,31 @@ def get_generated_chunks(
             if isinstance(reasoning, str):
                 generated_chunks.append(("reasoning", reasoning))
     return generated_chunks
+
+
+def get_refusal(
+    content_blocks: list[dict[str, Any]],
+    additional_kwargs: dict[str, Any],
+) -> str | None:
+    refusal = additional_kwargs.get("refusal")
+    if isinstance(refusal, str):
+        return refusal
+
+    for block in content_blocks:
+        if block.get("type") == "refusal":
+            refusal = block.get("refusal")
+        elif block.get("type") == "non_standard":
+            value = block.get("value")
+            if not isinstance(value, dict) or value.get("type") != "refusal":
+                continue
+            refusal = value.get("refusal")
+        else:
+            continue
+
+        if isinstance(refusal, str):
+            return refusal
+
+    return None
 
 
 class ModelService:
@@ -215,6 +245,16 @@ class ModelService:
                 token, metadata = event
                 if not isinstance(token, AIMessageChunk):
                     continue
+
+                refusal = get_refusal(
+                    token.content_blocks,
+                    token.additional_kwargs,
+                )
+                if refusal is not None:
+                    logger.info("Generated refusal: %r", refusal)
+                    raise ModelRefusalError(
+                        "The model refused to answer the request"
+                    )
 
                 for chunk_type, content in get_generated_chunks(
                     token.content_blocks

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+from services.model_service import ModelRefusalError
 
 
 def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,6 +83,39 @@ def test_chat_logs_and_streams_error_json(
     )
 
 
+def test_chat_streams_non_retryable_error_for_model_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refused_stream() -> Iterator[str]:
+        raise ModelRefusalError("The model refused to answer the request")
+        yield
+
+    service = Mock()
+    service.create_chat_completion.return_value = refused_stream()
+    logger = Mock()
+    monkeypatch.setattr(main, "model_service", service)
+    monkeypatch.setattr(main, "logger", logger)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/chat",
+            json={"messages": [{"role": "user", "content": "Question"}]},
+        )
+
+    assert response.status_code == 200
+    assert [json.loads(line) for line in response.text.splitlines()] == [
+        {
+            "error": {
+                "message": main.CHAT_REFUSAL_MESSAGE,
+                "retryable": False,
+            }
+        }
+    ]
+    logger.exception.assert_called_once_with(
+        "Chat completion was refused while streaming"
+    )
+
+
 def test_chat_logs_and_returns_error_json_before_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -108,4 +142,33 @@ def test_chat_logs_and_returns_error_json_before_streaming(
     }
     logger.exception.assert_called_once_with(
         "Chat completion failed before streaming"
+    )
+
+
+def test_chat_returns_non_retryable_error_for_refusal_before_streaming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = Mock()
+    service.create_chat_completion.side_effect = ModelRefusalError(
+        "The model refused to answer the request"
+    )
+    logger = Mock()
+    monkeypatch.setattr(main, "model_service", service)
+    monkeypatch.setattr(main, "logger", logger)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/chat",
+            json={"messages": [{"role": "user", "content": "Question"}]},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "message": main.CHAT_REFUSAL_MESSAGE,
+            "retryable": False,
+        }
+    }
+    logger.exception.assert_called_once_with(
+        "Chat completion was refused before streaming"
     )

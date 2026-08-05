@@ -12,7 +12,11 @@ from langchain_core.messages import (
 from langgraph.errors import GraphRecursionError
 
 import services.model_service as model_service_module
-from services.model_service import ModelService, convert_messages
+from services.model_service import (
+    ModelRefusalError,
+    ModelService,
+    convert_messages,
+)
 
 
 def test_initialize_creates_model_and_agent_once(
@@ -389,6 +393,51 @@ def test_create_chat_completion_requires_final_assistant_message() -> None:
 
     with pytest.raises(
         RuntimeError, match="agent did not return an assistant response"
+    ):
+        list(
+            service.create_chat_completion(
+                [{"role": "user", "content": "Question"}]
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "chunk",
+    [
+        AIMessageChunk(
+            content=[
+                {
+                    "type": "refusal",
+                    "refusal": "I can't help with that request.",
+                }
+            ]
+        ),
+        AIMessageChunk(
+            content="",
+            additional_kwargs={
+                "refusal": "I can't help with that request."
+            },
+        ),
+    ],
+)
+def test_create_chat_completion_raises_model_refusal_error(
+    chunk: AIMessageChunk,
+) -> None:
+    agent = Mock()
+    agent.stream.return_value = iter(
+        [
+            (
+                "messages",
+                (chunk, {"langgraph_node": "model"}),
+            )
+        ]
+    )
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+
+    with pytest.raises(
+        ModelRefusalError, match="model refused to answer the request"
     ):
         list(
             service.create_chat_completion(

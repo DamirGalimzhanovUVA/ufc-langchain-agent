@@ -10,12 +10,19 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from services.model_service import ModelService, model_service
+from services.model_service import (
+    ModelRefusalError,
+    ModelService,
+    model_service,
+)
 
 
 logger = logging.getLogger("uvicorn.error")
 CHAT_ERROR_MESSAGE = (
     "We couldn't complete your request. Please send your message again."
+)
+CHAT_REFUSAL_MESSAGE = (
+    "The model couldn't answer that request. Try rephrasing your message."
 )
 
 
@@ -52,6 +59,16 @@ def stream_chat_events(tokens: Iterator[str]) -> Iterator[str]:
     try:
         for token in tokens:
             yield json.dumps({"content": token}) + "\n"
+    except ModelRefusalError:
+        logger.exception("Chat completion was refused while streaming")
+        yield json.dumps(
+            {
+                "error": {
+                    "message": CHAT_REFUSAL_MESSAGE,
+                    "retryable": False,
+                }
+            }
+        ) + "\n"
     except Exception:
         logger.exception("Chat completion failed while streaming")
         yield json.dumps(
@@ -72,6 +89,17 @@ def create_chat_completion(
     messages = [message.model_dump() for message in chat_request.messages]
     try:
         tokens = service.create_chat_completion(messages)
+    except ModelRefusalError:
+        logger.exception("Chat completion was refused before streaming")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": CHAT_REFUSAL_MESSAGE,
+                    "retryable": False,
+                }
+            },
+        )
     except Exception:
         logger.exception("Chat completion failed before streaming")
         return JSONResponse(
