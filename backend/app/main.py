@@ -61,19 +61,13 @@ app = FastAPI(lifespan=lifespan)
 def get_error_content(
     message: str,
     retryable: bool,
-    error: Exception,
 ) -> dict[str, Any]:
-    error_content: dict[str, Any] = {
-        "message": message,
-        "retryable": retryable,
+    return {
+        "error": {
+            "message": message,
+            "retryable": retryable,
+        }
     }
-    if (
-        SHOW_MODEL_RESPONSE_JSON
-        and isinstance(error, ModelResponseError)
-        and error.model_response is not None
-    ):
-        error_content["modelResponse"] = error.model_response
-    return {"error": error_content}
 
 
 def log_chat_exception(message: str, error: Exception) -> None:
@@ -102,12 +96,12 @@ def stream_chat_events(tokens: Iterator[str]) -> Iterator[str]:
             error,
         )
         yield json.dumps(
-            get_error_content(CHAT_REFUSAL_MESSAGE, False, error)
+            get_error_content(CHAT_REFUSAL_MESSAGE, False)
         ) + "\n"
     except Exception as error:
         log_chat_exception("Chat completion failed while streaming", error)
         yield json.dumps(
-            get_error_content(CHAT_ERROR_MESSAGE, True, error)
+            get_error_content(CHAT_ERROR_MESSAGE, True)
         ) + "\n"
 
 
@@ -126,13 +120,13 @@ def create_chat_completion(
         )
         return JSONResponse(
             status_code=400,
-            content=get_error_content(CHAT_REFUSAL_MESSAGE, False, error),
+            content=get_error_content(CHAT_REFUSAL_MESSAGE, False),
         )
     except Exception as error:
         log_chat_exception("Chat completion failed before streaming", error)
         return JSONResponse(
             status_code=500,
-            content=get_error_content(CHAT_ERROR_MESSAGE, True, error),
+            content=get_error_content(CHAT_ERROR_MESSAGE, True),
         )
 
     return StreamingResponse(

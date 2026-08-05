@@ -116,7 +116,7 @@ def test_chat_streams_non_retryable_error_for_model_refusal(
     )
 
 
-def test_chat_streams_model_response_json(
+def test_chat_logs_model_response_json_without_streaming_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_response = {
@@ -133,7 +133,9 @@ def test_chat_streams_model_response_json(
 
     service = Mock()
     service.create_chat_completion.return_value = failed_stream()
+    logger = Mock()
     monkeypatch.setattr(main, "model_service", service)
+    monkeypatch.setattr(main, "logger", logger)
     with TestClient(main.app) as client:
         response = client.post(
             "/chat",
@@ -145,10 +147,14 @@ def test_chat_streams_model_response_json(
             "error": {
                 "message": main.CHAT_ERROR_MESSAGE,
                 "retryable": True,
-                "modelResponse": model_response,
             }
         }
     ]
+    logger.exception.assert_called_once_with(
+        "%s\nModel response JSON:\n%s",
+        "Chat completion failed while streaming",
+        json.dumps(model_response, indent=2),
+    )
 
 
 def test_chat_logs_and_returns_error_json_before_streaming(
