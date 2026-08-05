@@ -48,7 +48,9 @@ class EmptyModelResponseError(ModelResponseError):
 
 SYSTEM_PROMPT = """You are a UFC research assistant.
 Use the Wikipedia tool for fighter background and career information.
+Call the Wikipedia tool no more than once per user request.
 Use the fighter stats tool for structured fighter statistics.
+Call the fighter stats tool no more than once per user request.
 Use the fight description tool when asked for the background, stakes, or
 description of a specific matchup covered by an MMA Fighting live blog.
 Call the fight description tool no more than once per user request.
@@ -197,6 +199,16 @@ class ModelService:
                     ),
                     ToolCallLimitMiddleware(
                         tool_name="fight_description",
+                        run_limit=1,
+                        exit_behavior="continue",
+                    ),
+                    ToolCallLimitMiddleware(
+                        tool_name="fighter_stats",
+                        run_limit=1,
+                        exit_behavior="continue",
+                    ),
+                    ToolCallLimitMiddleware(
+                        tool_name="fighter_wikipedia",
                         run_limit=1,
                         exit_behavior="continue",
                     ),

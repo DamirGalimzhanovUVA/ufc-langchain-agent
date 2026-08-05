@@ -29,8 +29,15 @@ def test_initialize_creates_model_and_agent_once(
     create_agent = Mock(return_value=agent)
     news_call_limit = Mock()
     fight_description_call_limit = Mock()
+    fighter_stats_call_limit = Mock()
+    fighter_wikipedia_call_limit = Mock()
     tool_call_limit = Mock(
-        side_effect=[news_call_limit, fight_description_call_limit]
+        side_effect=[
+            news_call_limit,
+            fight_description_call_limit,
+            fighter_stats_call_limit,
+            fighter_wikipedia_call_limit,
+        ]
     )
     monkeypatch.setattr(model_service_module, "ChatOpenAI", chat_openai)
     monkeypatch.setattr(model_service_module, "create_agent", create_agent)
@@ -65,6 +72,16 @@ def test_initialize_creates_model_and_agent_once(
             run_limit=1,
             exit_behavior="continue",
         ),
+        call(
+            tool_name="fighter_stats",
+            run_limit=1,
+            exit_behavior="continue",
+        ),
+        call(
+            tool_name="fighter_wikipedia",
+            run_limit=1,
+            exit_behavior="continue",
+        ),
     ]
     create_agent.assert_called_once_with(
         model=chat_model,
@@ -74,6 +91,8 @@ def test_initialize_creates_model_and_agent_once(
             model_service_module.log_news_search_decision,
             news_call_limit,
             fight_description_call_limit,
+            fighter_stats_call_limit,
+            fighter_wikipedia_call_limit,
         ],
     )
 
@@ -92,6 +111,15 @@ def test_system_prompt_requires_up_to_two_relevant_news_retries() -> None:
 
 def test_system_prompt_limits_fight_description_to_one_call() -> None:
     assert "fight description tool no more than once" in (
+        model_service_module.SYSTEM_PROMPT
+    )
+
+
+def test_system_prompt_limits_stats_and_wikipedia_to_one_call() -> None:
+    assert "Wikipedia tool no more than once" in (
+        model_service_module.SYSTEM_PROMPT
+    )
+    assert "fighter stats tool no more than once" in (
         model_service_module.SYSTEM_PROMPT
     )
 
