@@ -415,6 +415,7 @@ button {
   border-left: 3px solid var(--ufc-red);
   border-radius: 4px;
   font-size: .75rem;
+  white-space: pre-wrap;
 }
 
 .composer-wrap {

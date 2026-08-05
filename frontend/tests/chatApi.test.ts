@@ -83,3 +83,29 @@ test('streamChat handles an error after partial streamed content', async () => {
     /Please send the message again/,
   )
 })
+
+test('streamChat displays model response JSON from a debug error', async () => {
+  const fetchRequest = async (): Promise<Response> =>
+    Response.json(
+      {
+        error: {
+          message: 'The model returned no text.',
+          retryable: true,
+          modelResponse: {
+            content: '',
+            response_metadata: { finish_reason: 'length' },
+          },
+        },
+      },
+      { status: 500 },
+    )
+
+  await assert.rejects(
+    streamChat([], () => undefined, fetchRequest),
+    (error: Error) => {
+      assert.match(error.message, /The model returned no text/)
+      assert.match(error.message, /"finish_reason": "length"/)
+      return true
+    },
+  )
+})

@@ -6,6 +6,7 @@ export type ChatRequestMessage = {
 type ChatError = {
   message: string
   retryable: boolean
+  modelResponse?: unknown
 }
 
 type ChatEvent = {
@@ -16,10 +17,17 @@ type ChatEvent = {
 const fallbackErrorMessage =
   "We couldn't complete your request. Please send your message again."
 
+function formatError(error: ChatError | undefined): string {
+  const message = error?.message || fallbackErrorMessage
+  if (error?.modelResponse === undefined) return message
+
+  return `${message}\n\nModel response:\n${JSON.stringify(error.modelResponse, null, 2)}`
+}
+
 async function getErrorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as ChatEvent
-    return body.error?.message || fallbackErrorMessage
+    return formatError(body.error)
   } catch {
     return fallbackErrorMessage
   }
@@ -59,7 +67,7 @@ export async function streamChat(
     }
 
     if (event.error) {
-      throw new Error(event.error.message || fallbackErrorMessage)
+      throw new Error(formatError(event.error))
     }
     if (typeof event.content === 'string') {
       content += event.content

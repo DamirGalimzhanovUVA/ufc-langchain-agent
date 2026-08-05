@@ -28,7 +28,21 @@ ChatMessage = dict[str, str]
 logger = logging.getLogger("uvicorn.error")
 
 
-class ModelRefusalError(RuntimeError):
+class ModelResponseError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        model_response: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.model_response = model_response
+
+
+class ModelRefusalError(ModelResponseError):
+    pass
+
+
+class EmptyModelResponseError(ModelResponseError):
     pass
 
 
@@ -214,6 +228,7 @@ class ModelService:
         graph_tasks = 0
         model_calls = 0
         tool_calls = 0
+        last_model_response: dict[str, Any] | None = None
 
         stream = agent.stream(
             {"messages": agent_messages},
@@ -246,6 +261,7 @@ class ModelService:
                 if not isinstance(token, AIMessageChunk):
                     continue
 
+                last_model_response = token.model_dump(mode="json")
                 refusal = get_refusal(
                     token.content_blocks,
                     token.additional_kwargs,
@@ -253,7 +269,8 @@ class ModelService:
                 if refusal is not None:
                     logger.info("Generated refusal: %r", refusal)
                     raise ModelRefusalError(
-                        "The model refused to answer the request"
+                        "The model refused to answer the request",
+                        last_model_response,
                     )
 
                 for chunk_type, content in get_generated_chunks(
@@ -278,7 +295,10 @@ class ModelService:
             )
 
         if not returned_content:
-            raise RuntimeError("The agent did not return an assistant response")
+            raise EmptyModelResponseError(
+                "The agent did not return an assistant response",
+                last_model_response,
+            )
 
 
 model_service = ModelService()

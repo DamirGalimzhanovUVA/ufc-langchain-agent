@@ -92,6 +92,7 @@ Docker reads the application configuration from `backend/.env` through the
 | `FIGHTER_STATS_API_KEY` | None                    | API key sent to the CitoAPI fighter stats service    |
 | `LLM_MODEL`             | `gpt-5-nano`            | OpenAI model used by the agent                       |
 | `LLM_MAX_TOKENS`        | `2048`                  | Maximum generated tokens                             |
+| `SHOW_MODEL_RESPONSE_JSON` | `false`               | Shows model response JSON in chat errors for testing |
 | `BACKEND_HOST`          | `0.0.0.0`               | FastAPI bind address                                 |
 | `BACKEND_PORT`          | `8000`                  | FastAPI port                                         |
 | `BACKEND_ENV_FILE`      | `/app/backend/.env`     | Alternate backend env-file path used by `launch.sh`  |

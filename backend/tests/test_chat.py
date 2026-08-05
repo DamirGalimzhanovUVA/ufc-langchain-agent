@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from services.model_service import ModelRefusalError
+from services.model_service import EmptyModelResponseError, ModelRefusalError
 
 
 def test_chat_streams_model_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +114,43 @@ def test_chat_streams_non_retryable_error_for_model_refusal(
     logger.exception.assert_called_once_with(
         "Chat completion was refused while streaming"
     )
+
+
+def test_chat_streams_model_response_json_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_response = {
+        "content": "",
+        "response_metadata": {"finish_reason": "length"},
+    }
+
+    def failed_stream() -> Iterator[str]:
+        raise EmptyModelResponseError(
+            "The agent did not return an assistant response",
+            model_response,
+        )
+        yield
+
+    service = Mock()
+    service.create_chat_completion.return_value = failed_stream()
+    monkeypatch.setattr(main, "model_service", service)
+    monkeypatch.setenv("SHOW_MODEL_RESPONSE_JSON", "true")
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/chat",
+            json={"messages": [{"role": "user", "content": "Question"}]},
+        )
+
+    assert [json.loads(line) for line in response.text.splitlines()] == [
+        {
+            "error": {
+                "message": main.CHAT_ERROR_MESSAGE,
+                "retryable": True,
+                "modelResponse": model_response,
+            }
+        }
+    ]
 
 
 def test_chat_logs_and_returns_error_json_before_streaming(

@@ -13,6 +13,7 @@ from langgraph.errors import GraphRecursionError
 
 import services.model_service as model_service_module
 from services.model_service import (
+    EmptyModelResponseError,
     ModelRefusalError,
     ModelService,
     convert_messages,
@@ -399,6 +400,47 @@ def test_create_chat_completion_requires_final_assistant_message() -> None:
                 [{"role": "user", "content": "Question"}]
             )
         )
+
+
+def test_create_chat_completion_captures_empty_model_response_json() -> None:
+    chunk = AIMessageChunk(
+        content="",
+        response_metadata={"finish_reason": "length"},
+        usage_metadata={
+            "input_tokens": 100,
+            "output_tokens": 2048,
+            "total_tokens": 2148,
+        },
+    )
+    agent = Mock()
+    agent.stream.return_value = iter(
+        [
+            (
+                "messages",
+                (chunk, {"langgraph_node": "model"}),
+            )
+        ]
+    )
+    service = ModelService()
+    service.chat_model = Mock()
+    service.agent = agent
+
+    with pytest.raises(EmptyModelResponseError) as raised_error:
+        list(
+            service.create_chat_completion(
+                [{"role": "user", "content": "Question"}]
+            )
+        )
+
+    assert raised_error.value.model_response is not None
+    assert raised_error.value.model_response["response_metadata"] == {
+        "finish_reason": "length"
+    }
+    assert raised_error.value.model_response["usage_metadata"] == {
+        "input_tokens": 100,
+        "output_tokens": 2048,
+        "total_tokens": 2148,
+    }
 
 
 @pytest.mark.parametrize(

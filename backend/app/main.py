@@ -4,6 +4,7 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from services.model_service import (
     ModelRefusalError,
+    ModelResponseError,
     ModelService,
     model_service,
 )
@@ -55,29 +57,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(lifespan=lifespan)
 
 
+def get_error_content(
+    message: str,
+    retryable: bool,
+    error: Exception,
+) -> dict[str, Any]:
+    error_content: dict[str, Any] = {
+        "message": message,
+        "retryable": retryable,
+    }
+    if (
+        os.getenv("SHOW_MODEL_RESPONSE_JSON") == "true"
+        and isinstance(error, ModelResponseError)
+        and error.model_response is not None
+    ):
+        error_content["modelResponse"] = error.model_response
+    return {"error": error_content}
+
+
 def stream_chat_events(tokens: Iterator[str]) -> Iterator[str]:
     try:
         for token in tokens:
             yield json.dumps({"content": token}) + "\n"
-    except ModelRefusalError:
+    except ModelRefusalError as error:
         logger.exception("Chat completion was refused while streaming")
         yield json.dumps(
-            {
-                "error": {
-                    "message": CHAT_REFUSAL_MESSAGE,
-                    "retryable": False,
-                }
-            }
+            get_error_content(CHAT_REFUSAL_MESSAGE, False, error)
         ) + "\n"
-    except Exception:
+    except Exception as error:
         logger.exception("Chat completion failed while streaming")
         yield json.dumps(
-            {
-                "error": {
-                    "message": CHAT_ERROR_MESSAGE,
-                    "retryable": True,
-                }
-            }
+            get_error_content(CHAT_ERROR_MESSAGE, True, error)
         ) + "\n"
 
 
@@ -89,27 +99,17 @@ def create_chat_completion(
     messages = [message.model_dump() for message in chat_request.messages]
     try:
         tokens = service.create_chat_completion(messages)
-    except ModelRefusalError:
+    except ModelRefusalError as error:
         logger.exception("Chat completion was refused before streaming")
         return JSONResponse(
             status_code=400,
-            content={
-                "error": {
-                    "message": CHAT_REFUSAL_MESSAGE,
-                    "retryable": False,
-                }
-            },
+            content=get_error_content(CHAT_REFUSAL_MESSAGE, False, error),
         )
-    except Exception:
+    except Exception as error:
         logger.exception("Chat completion failed before streaming")
         return JSONResponse(
             status_code=500,
-            content={
-                "error": {
-                    "message": CHAT_ERROR_MESSAGE,
-                    "retryable": True,
-                }
-            },
+            content=get_error_content(CHAT_ERROR_MESSAGE, True, error),
         )
 
     return StreamingResponse(
